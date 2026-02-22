@@ -1,0 +1,17 @@
+@unbox = λ{#Box: λx. x}
+
+@A = λB. λ{
+  0:
+    &Tu{ #Box{0} , #Box{0} }
+  λ&x.
+    ! T &Tu = B(@A, x - 1)
+    &Tu{ #Box{@unbox(T₀)} , #Box{@unbox(T₁)} }
+}
+
+@B = λA. λval.
+  ! T &Tu = A(@B, val)
+  &Tu{ #Box{@unbox(T₀)} , #Box{@unbox(T₁)} }
+
+@main =
+  ! X &Tu = @A(@B, 5000000)
+  &Tu{X₀, X₁}
