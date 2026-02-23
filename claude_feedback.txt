@@ -1,0 +1,203 @@
+Bend2 Feedback Log
+==================
+
+## collatz (2026-02-23)
+
+- `bend` with no args or `bend --help` gives "error: file not found: --help".
+  Unhelpful — should print usage without the error prefix.
+  Reproducer: just run `bend --help` in terminal.
+  Expected: usage text (which does appear, but prefixed by an error line).
+  Got: `error: file not found: --help` followed by usage text.
+
+- `match n: case 1: ... case k: ...` on U32 works, but it's unclear from
+  syntax alone whether `k` binds to `n` or `n-1`. Had to guess it binds to
+  `n` (confirmed by correct output). Documenting this would help.
+
+- No issue with tail recursion on `steps()` or `total()` — both ran fine
+  at 8M iterations in JS mode. No stack overflow.
+
+- Compilation + execution feedback is minimal: no warnings, no timing, just
+  the result. A `--time` flag would be handy for benchmarking.
+
+## sort_quick (2026-02-23)
+
+- Type refinement in multi-case list match causes surprising errors.
+  A 3-case match `[] / x<>[] / x<>xt` refines `xt` to non-nil, making it
+  incompatible with `Lst`. This is correct type theory but confusing in
+  practice — the error message gives no line number, just the mismatch.
+  Fix: use a 2-case match instead and let partition handle singletons.
+
+  Reproducer (the `sort` function causes the error):
+  ```
+  type Bool() { T{} F{} }
+  type Lst() { nil{} cons{U32, Lst} }
+  type Pair() { pair{Lst, Lst} }
+  def u2b(n: U32) -> Bool:
+    λ{0: F{}; x => T{}}(n)
+  def part(piv: U32, xs: Lst) -> Pair:
+    match xs:
+      case []:
+        pair{[], []}
+      case x<>xt:
+        le = u2b(x <= piv)
+        p  = part(piv, xt)
+        match p:
+          case pair{lo, hi}:
+            match le:
+              case T{}: pair{x<>lo, hi}
+              case F{}: pair{lo, x<>hi}
+  def sort(xs: Lst) -> Lst:
+    match xs:
+      case []:     []
+      case x<>[]:  [x]
+      case x<>xt:  part(x, xt) :: Pair
+  def main() -> U32: 0
+  ```
+  Expected: compiles fine, `xt` is `Lst`.
+  Got: `error: Mismatch: expected: Lst, detected: type { cons{U32, Lst} }`.
+  The refinement excludes nil from `xt` since `x<>[]` was matched above.
+  Confusing because the error lacks a line number or source location.
+
+- Error messages lack source locations (line:col). This makes debugging
+  harder — I had to reason about which match clause caused the mismatch.
+
+## queue_bank (2026-02-23)
+
+- JS backend only does self-TCO (while-loop transform) for DIRECT
+  self-recursive tail calls. Mutual recursion (f → g → f) gets plain
+  JS calls and overflows. This means the common Bend pattern of
+  `foo(x) = ... foo_go(u2b(...), x)` / `foo_go(T) = ...; foo_go(F) = foo(x)`
+  silently overflows at ~5K depth in JS mode.
+
+  Reproducer (fill overflows at n=4096):
+  ```
+  type Bool() { T{} F{} }
+  type Lst() { nil{} cons{U32, Lst} }
+  def u2b(n: U32) -> Bool:
+    λ{0: F{}; x => T{}}(n)
+  def fill(xs: Lst, n: U32) -> Lst:
+    done = u2b(n === 0)
+    fill_go(done, xs, n)
+  def fill_go(done: Bool, xs: Lst, n: U32) -> Lst:
+    match done:
+      case T{}: xs
+      case F{}: fill(n<>xs, n - 1)
+  def main() -> U32:
+    fill([], 4096) :: Lst
+    0
+  ```
+  Expected: runs fine (both calls are in tail position).
+  Got: `RangeError: Maximum call stack size exceeded` in JS mode.
+  Workaround: use `match n: case 0: ... case k: ...` instead of
+  the Bool helper pattern, so the function is directly self-recursive
+  and gets the while-loop transform.
+
+- The self-TCO while-loop DOES work when a function has mixed branches
+  (some self-recursive, some calling another function), as long as at
+  least one branch is a direct self-tail-call. Confirmed: `drain_f`
+  self-recurses on `x<>xt` branch and calls `drain_b` on `[]` branch;
+  the self-call branch gets the loop, and the other branch is a normal
+  call. This is good.
+
+## graph_color (2026-02-23)
+
+- No new issues. `ok * solve(...)` pattern works for conditional recursion
+  (when ok=0, solve still evaluates but result is discarded via multiply).
+  This is expected for a strict language but worth noting: there's no
+  short-circuit for `0 * expr` — the expr is fully computed.
+
+## huffman (2026-02-23)
+
+- BUG: Inline case bodies are rejected by the parser.
+  `case 0: []` fails with "expected an indented case body". Must use:
+  ```
+  case 0:
+    []
+  ```
+  Reproducer:
+  ```
+  type Lst() { nil{} cons{U32, Lst} }
+  def foo(n: U32) -> Lst:
+    match n:
+      case 0: []
+      case k: 0<>foo(k - 1)
+  def main() -> U32: 0
+  ```
+  Expected: parses fine (other constructs like `case T{}: acc` work inline).
+  Got: ParseError "expected an indented case body".
+
+- BUG (major): "can't infer constructor" when U32 numeric switch returns
+  ADT constructors, but only when another ADT-typed parameter is in scope.
+  `match n:` on U32 always fails; lambda-match `λ{0: ...; k => ...}`
+  fails when ANY function in the file has an ADT-typed parameter.
+
+  Minimal reproducer:
+  ```
+  type Tree() { leaf{U32} node{Tree, Tree} }
+  def foo(n: U32) -> Tree:
+    λ{0: node{leaf{0}, leaf{0}}; k => node{leaf{k}, leaf{k}}}(n)
+  def bar(n: U32, t: Tree) -> Tree:
+    λ{0: node{leaf{0}, leaf{0}}; k => node{leaf{k}, leaf{k}}}(n)
+  def main() -> U32: 0
+  ```
+  Expected: compiles (both functions return Tree from U32 switch).
+  Got: "can't infer constructor". Removing `bar` (which has `t: Tree`
+  param) makes the file compile. `bar` doesn't even use `t`!
+
+  Workaround: convert U32 to Bool via `u2b`, then `match` on Bool (ADT
+  match has no inference issues). Works because the switch is on a
+  user-defined ADT, not a U32.
+
+- CONFUSING: `match n: case k:` binds k=n, but `λ{0: ...; k => ...}`
+  binds k=n-1. This difference is documented but easy to trip over. Caused
+  a silent off-by-one in `zeros` that produced half the expected list.
+
+- Stack overflow in decode with 2000-char text. decode ↔ decode_bit mutual
+  recursion creates ~6000 frames for ~2000 bits. Kept text at 500 chars
+  (safe) and used more rounds instead.
+
+## prime_sieve (2026-02-23)
+
+- BUG: Shadowing a parameter with a let-bound constructor before a U32
+  match triggers "can't infer constructor", even though the match returns
+  the variable (not the constructor directly).
+
+  Reproducer:
+  ```
+  type Lst() { nil{} cons{U32, Lst} }
+  def range(n: U32, cur: U32, acc: Lst) -> Lst:
+    acc = cur<>acc
+    match n:
+      case 0:
+        acc
+      case k:
+        range(k - 1, cur - 1, acc)
+  def main() -> U32: 0
+  ```
+  Expected: compiles (match returns a variable, not a constructor).
+  Got: "can't infer constructor".
+  Workaround: put the constructor expression directly in each branch:
+  `case 0: cur<>acc` and `case k: range(k-1, cur-1, cur<>acc)`.
+
+## ray_sphere (2026-02-23)
+
+- BUG: Let-binding an ADT constructor before using it inside another ADT
+  constructor triggers "can't infer constructor". This is a generalization
+  of the prime_sieve shadowing bug — it's not just about U32 match, but
+  any context where a let-bound ADT value is used inside another ADT.
+
+  Reproducer:
+  ```
+  type Sphere() { sphere{U32, U32, U32} }
+  type Scene() { snil{} scons{Sphere, Scene} }
+  def main() -> U32:
+    s = sphere{1, 2, 3}
+    sc = scons{s, snil{}}
+    0
+  ```
+  Expected: compiles (just constructing nested ADTs).
+  Got: "can't infer constructor".
+  Workaround: inline the constructor instead of let-binding:
+  `scons{sphere{1, 2, 3}, snil{}}` works. Or wrap the construction in
+  a separate function. This means `build_scene` must inline all sphere
+  constructors rather than assigning them to variables first.
