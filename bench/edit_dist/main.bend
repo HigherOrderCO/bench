@@ -25,7 +25,11 @@ def rng(seed: U32) -> U32:
 
 # Returns the minimum of two U32 values.
 def min2(a: U32, b: U32) -> U32:
-  λ{0: b; x => a}(a <= b)
+  match a <= b:
+    case 0:
+      b
+    case x:
+      a
 
 # Returns the minimum of three U32 values.
 def min3(a: U32, b: U32, c: U32) -> U32:
@@ -33,7 +37,11 @@ def min3(a: U32, b: U32, c: U32) -> U32:
 
 # Returns 1 when values differ, else 0.
 def neq_u32(a: U32, b: U32) -> U32:
-  λ{0: 0; x => 1}(a !== b)
+  match a !== b:
+    case 0:
+      0
+    case x:
+      1
 
 # Reverses a list using an accumulator.
 def rev(xs: Lst, acc: Lst) -> Lst:
@@ -64,7 +72,11 @@ def last_go(x: U32, xs: Lst) -> U32:
 
 # Builds a pseudo-random U32 sequence of length `len`.
 def gen(len: U32, seed: U32) -> Lst:
-  λ{0: gen_go(len, seed); x => []}(len === 0)
+  match len === 0:
+    case 0:
+      gen_go(len, seed)
+    case x:
+      []
 
 # Builds one random element and recurs.
 def gen_go(len: U32, seed: U32) -> Lst:
@@ -87,7 +99,11 @@ def init_row(n: U32) -> Lst:
 
 # Builds one cell of the initial row.
 def init_row_go(i: U32, n: U32) -> Lst:
-  λ{0: init_row_step(i, n); x => i<>[]}(i === n)
+  match i === n:
+    case 0:
+      init_row_step(i, n)
+    case x:
+      i<>[]
 
 # Builds the recursive branch for initial row construction.
 def init_row_step(i: U32, n: U32) -> Lst:
@@ -158,7 +174,11 @@ def round_st(s: St) -> St:
 
 # Runs benchmark rounds.
 def bench(rounds: U32, seed: U32, acc: U32) -> U32:
-  λ{0: bench_go(rounds, seed, acc); x => acc}(rounds === 0)
+  match rounds === 0:
+    case 0:
+      bench_go(rounds, seed, acc)
+    case x:
+      acc
 
 # Runs four rounds per recursion step.
 def bench_go(rounds: U32, seed: U32, acc: U32) -> U32:

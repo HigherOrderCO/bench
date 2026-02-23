@@ -30,7 +30,11 @@ type St() {
 
 # Converts U32 zero/nonzero to Bool
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Advances a linear-congruential generator seed
 def rng(seed: U32) -> U32:

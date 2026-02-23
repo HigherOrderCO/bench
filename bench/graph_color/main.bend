@@ -16,7 +16,11 @@ type Lst() {
 
 # Returns 1 if n is zero, else 0
 def is_zero(n: U32) -> U32:
-  λ{0: 1; x => 0}(n)
+  match n:
+    case 0:
+      1
+    case x:
+      0
 
 # Graph
 # -----

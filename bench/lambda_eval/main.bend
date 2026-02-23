@@ -31,7 +31,11 @@ def rng(seed: U32) -> U32:
 
 # Converts a numeric predicate into Bool.
 def u2b(x: U32) -> Bool:
-  λ{0: F{}; k => T{}}(x)
+  match x:
+    case 0:
+      F{}
+    case k:
+      T{}
 
 # Shifts free variables by `by` at depth >= `dep`.
 def shift_above(tm: Tm, by: U32, dep: U32) -> Tm:
@@ -190,7 +194,11 @@ def church_to_u32_lam(bod: Tm) -> U32:
 def is_var(tm: Tm, idx: U32) -> U32:
   match tm:
     case var{k}:
-      λ{0: 0; x => 1}(k === idx)
+      match k === idx:
+        case 0:
+          0
+        case x:
+          1
     case tm:
       0
 
@@ -206,7 +214,11 @@ def count_apps(tm: Tm) -> U32:
 
 # Counts one application node in Church body.
 def count_app(fun: Tm, arg: Tm) -> U32:
-  λ{0: count_apps(fun) + count_apps(arg); x => count_apps(arg) + 1}(is_var(fun, 1))
+  match is_var(fun, 1):
+    case 0:
+      count_apps(fun) + count_apps(arg)
+    case x:
+      count_apps(arg) + 1
 
 # Benchmark
 # ---------
@@ -241,7 +253,11 @@ def round_st(s: St) -> St:
 
 # Runs benchmark rounds.
 def bench(rounds: U32, seed: U32, acc: U32) -> U32:
-  λ{0: bench_go(rounds, seed, acc); x => acc}(rounds === 0)
+  match rounds === 0:
+    case 0:
+      bench_go(rounds, seed, acc)
+    case x:
+      acc
 
 # Runs four rounds per recursion step.
 def bench_go(rounds: U32, seed: U32, acc: U32) -> U32:

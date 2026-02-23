@@ -22,7 +22,11 @@ type Lst() {
 
 # Converts U32 zero/nonzero to Bool
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Reverses a list with tail-recursive accumulator
 def rev(xs: Lst, acc: Lst) -> Lst:

@@ -33,7 +33,11 @@ def base_u32() -> U32:
 
 # Converts U32 (0/nonzero) to Bool.
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Advances a U32 LCG seed.
 def rng(seed: U32) -> U32:

@@ -31,7 +31,11 @@ type St() {
 
 # Converts U32 (0/nonzero) to Bool.
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Advances a U32 linear-congruential generator seed.
 def rng(seed: U32) -> U32:
@@ -69,7 +73,11 @@ def ins_leaf(t: Trie, val: U32) -> Trie:
 
 # Branches insertion on bit value.
 def ins_bit(bit: U32, t: Trie, key: U32, val: U32, dep: U32) -> Trie:
-  λ{0: ins_lft(t, key, val, dep); x => ins_rgt(t, key, val, dep)}(bit)
+  match bit:
+    case 0:
+      ins_lft(t, key, val, dep)
+    case x:
+      ins_rgt(t, key, val, dep)
 
 # Inserts into the left branch.
 def ins_lft(t: Trie, key: U32, val: U32, dep: U32) -> Trie:
@@ -127,7 +135,11 @@ def mb_u32(mb: Mb) -> U32:
 
 # Branches lookup on bit value.
 def get_bit(bit: U32, t: Trie, key: U32, dep: U32) -> U32:
-  λ{0: get_lft(t, key, dep); x => get_rgt(t, key, dep)}(bit)
+  match bit:
+    case 0:
+      get_lft(t, key, dep)
+    case x:
+      get_rgt(t, key, dep)
 
 # Looks up in the left branch.
 def get_lft(t: Trie, key: U32, dep: U32) -> U32:

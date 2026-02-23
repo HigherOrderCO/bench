@@ -33,7 +33,11 @@ type PQ() {
 
 # Converts U32 zero/nonzero to Bool
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Advances a linear-congruential generator seed
 def rng(seed: U32) -> U32:
@@ -65,7 +69,11 @@ def gen(len: U32, seed: U32, acc: Lst) -> Lst:
 
 # Creates a list of n zeros
 def zeros(n: U32) -> Lst:
-  λ{0: []; k => 0<>zeros(k)}(n)
+  match n:
+    case 0:
+      []
+    case k:
+      0<>zeros(k - 1)
 
 # Increments element at index i in a list
 def inc_at(xs: Lst, i: U32) -> Lst:

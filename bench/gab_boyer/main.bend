@@ -118,7 +118,11 @@ def lm(lhs: Term, rhs: Term, rest: LmLs) -> LmLs:
 
 # Converts U32 (0 or nonzero) to Bool
 def u2b(n: U32) -> Bool:
-  λ{0: F{}; x => T{}}(n)
+  match n:
+    case 0:
+      F{}
+    case x:
+      T{}
 
 # Boolean AND
 def band(a: Bool, b: Bool) -> Bool:
