@@ -20,6 +20,7 @@ Benchmarks
 - `gen_hard` — Type-directed proof search generating a sort function, large inputs (HVM)
 - `gen_mul4k` — Proof search generating a multiplication function (HVM)
 - `mat_mul` — Nat-driven nested loops with U32 pseudo-random mixing (Bend)
+- `sort_merge` — Merge sort over immutable U32 lists with pseudo-random inputs (Bend)
 - `seq_pingpong` — Mutual recursion via boxed continuations, 5M bounces (HVM)
 - `spin_tree` — Binary tree to depth 8 with spin loops at 256 leaves (HVM)
 - `tree_fold` — Builds and folds a binary tree to depth 24 (Bend)
