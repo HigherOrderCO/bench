@@ -1,0 +1,260 @@
+# codex_feedback.txt
+# ==================
+# Append-only Bend2 pre-launch feedback log (from Codex sessions).
+
+[2026-02-23][sort_merge]
+- `error: can't infer constructor` was hard to act on: no file/line and no constructor/type detail.
+- I hit cases where `--to-core` succeeded but `--to-js` / `--as-js` failed on the same file; backend mismatch was confusing.
+- Pattern shape `λ{0: nil{}; p => cons{seed, gen(p, seed)}}(len)` failed with `can't infer constructor` despite explicit return type (`Lst`), which looked valid.
+- JS mode overflowed with `RangeError: Maximum call stack size exceeded` on deeper pure recursion; recursion depth/runtime limits are not obvious from tooling output.
+
+[2026-02-23][sort_merge][repro-001: constructor inference + backend mismatch]
+- Complete file:
+  ```bend
+  type Lst() {
+    nil{}
+    cons{U32, Lst}
+  }
+
+  def gen(len: U32, seed: U32) -> Lst:
+    λ{0: nil{}; p => cons{seed, gen(p, seed)}}(len)
+
+  def main() -> U32:
+    0
+  ```
+- Command:
+  - `bend repro-001.bend --as-js`
+  - `bend repro-001.bend --to-core`
+- Expected:
+  - Both backends accept this; function return type is explicit `Lst`, and both lambda arms return `Lst`.
+- Actual:
+  - `--as-js` fails with only `error: can't infer constructor`.
+  - `--to-core` succeeds.
+- Why this is wrong/confusing:
+  - The source is accepted by one backend and rejected by another.
+  - The error has no location or constructor/type context, so it is hard to debug.
+
+[2026-02-23][sort_merge][repro-002: JS stack overflow on pure recursion]
+- Complete file:
+  ```bend
+  type Bool() {
+    T{}
+    F{}
+  }
+
+  type Lst() {
+    nil{}
+    cons{U32, Lst}
+  }
+
+  def u2b(n: U32) -> Bool:
+    λ{0: F{}; x => T{}}(n)
+
+  def rng(seed: U32) -> U32:
+    seed * 1664525 + 1013904223
+
+  def gen(len: U32, seed: U32) -> Lst:
+    done = u2b(len === 0)
+    gen_go(done, len, seed)
+
+  def gen_go(done: Bool, len: U32, seed: U32) -> Lst:
+    match done:
+      case T{}:
+        []
+      case F{}:
+        val = rng(seed)
+        len = len - 1
+        val<>gen(len, val)
+
+  def len(xs: Lst, acc: U32) -> U32:
+    match xs:
+      case []:
+        acc
+      case x<>xt:
+        len(xt, acc + 1)
+
+  def main() -> U32:
+    len(gen(4096, 1), 0)
+  ```
+- Command:
+  - `bend repro-002.bend --as-js`
+- Expected:
+  - Program should run and return `4096`.
+- Actual:
+  - JS runtime crashes with `RangeError: Maximum call stack size exceeded`.
+- Why this is wrong/confusing:
+  - This is ordinary structural recursion over an immutable list.
+  - The tooling gives no guidance on practical recursion limits in JS mode, so benchmark tuning becomes trial-and-error.
+
+[2026-02-23][nqueens][repro-003: bitwise `&` / `|` parse confusion]
+- Complete file:
+  ```bend
+  def main() -> U32:
+    cols = 5
+    ds   = 3
+    all  = 7
+    all & (~(cols | ds))
+  ```
+- Command:
+  - `bend repro-003.bend --as-js`
+- Expected:
+  - If `&` / `|` are supported bitwise operators, this should compile and evaluate.
+  - If unsupported, docs/tooling should make that explicit and suggest alternatives.
+- Actual:
+  - Parser error:
+    - `expected: expected term`
+    - `detected: '&'`
+- Why this is wrong/confusing:
+  - For bitset-style algorithms (like N-Queens), `&` and `|` are natural operators.
+  - Current error message does not clarify whether this is a syntax mistake or an unsupported feature.
+
+[2026-02-23][nqueens][note: repro-003 resolved upstream]
+- `&` / `|` support was added in Bend2 and `&&` / `||` were removed from surface syntax to avoid duplicate forms.
+- Bend2 commit: `d8917cc` (`Use '&' and '|' as sole AND/OR syntax`).
+
+[2026-02-23][nqueens][repro-004: prefix `~` form rejected]
+- Complete file:
+  ```bend
+  def main() -> U32:
+    x = 5
+    ~x
+  ```
+- Command:
+  - `bend repro-004.bend --as-js`
+- Expected:
+  - Prefix bitwise-not form should parse if docs/examples imply unary `~`.
+- Actual:
+  - Parser error:
+    - `expected: expected term`
+    - `detected: '~'`
+- Why this is wrong/confusing:
+  - In bitset code, `~x` is the natural expression for complement.
+  - The current parser only accepts `~` in an infix-shaped position, which is non-obvious and easy to trip over.
+
+[2026-02-23][bignat_mul][repro-005: constructor multi-scrutinee inference]
+- Complete file:
+  ```bend
+  type Bool() {
+    T{}
+    F{}
+  }
+
+  type Lst() {
+    nil{}
+    cons{U32, Lst}
+  }
+
+  def u2b(n: U32) -> Bool:
+    λ{0: F{}; x => T{}}(n)
+
+  def f(car: U32) -> Lst:
+    done = u2b(car === 0)
+    match done car:
+      case T{} car:
+        []
+      case F{} car:
+        car<>[]
+
+  def main() -> U32:
+    0
+  ```
+- Command:
+  - `bend repro-005.bend`
+- Expected:
+  - Function should type-check; both match arms return `Lst` and scrutinee types are explicit.
+- Actual:
+  - Checker error: `can't infer constructor-match`.
+- Why this is wrong/confusing:
+  - The shape is a straightforward typed multi-scrutinee match.
+  - Error lacks location/context, so diagnosis requires manual minimization.
+
+[2026-02-23][bignat_mul][repro-006: numeric lambda returning list inference]
+- Complete file:
+  ```bend
+  type Lst() {
+    nil{}
+    cons{U32, Lst}
+  }
+
+  def f(car: U32) -> Lst:
+    λ{0: car<>[]; x => []}(car === 0)
+
+  def main() -> U32:
+    0
+  ```
+- Command:
+  - `bend repro-006.bend`
+- Expected:
+  - Should infer `Lst` from function return type and both lambda arms.
+- Actual:
+  - Checker error: `can't infer constructor`.
+- Why this is wrong/confusing:
+  - This is a small, typed branch expression commonly used in recursion/control flow.
+  - The error does not indicate which constructor/type inference step failed.
+
+[2026-02-23][edit_dist][note on repro-006]
+- Same inference family appeared again in `init_row_go` while building DP rows.
+- Pattern `λ{0: i<>init_row_go(i+1,n); x => i<>[]}(i===n)` failed with `can't infer constructor`.
+- Workaround was to split the recursive branch into a helper function (`init_row_step`).
+
+[2026-02-23][lambda_eval][repro-007: constructor-match on let-bound ADT fails in JS backend]
+- Complete file:
+  ```bend
+  type Bool() {
+    T{}
+    F{}
+  }
+
+  def u2b(x: U32) -> Bool:
+    λ{0: F{}; k => T{}}(x)
+
+  def f(x: U32) -> U32:
+    b = u2b(x === 0)
+    match b:
+      case T{}:
+        1
+      case F{}:
+        0
+
+  def main() -> U32:
+    f(0)
+  ```
+- Command:
+  - `bend repro-007.bend --to-core`
+  - `bend repro-007.bend --as-js`
+- Expected:
+  - Both commands should succeed; `b` is clearly `Bool`.
+- Actual:
+  - `--to-core` succeeds.
+  - `--as-js` fails with `error: can't infer constructor-match`.
+- Why this is wrong/confusing:
+  - Matching a typed ADT local binding is fundamental.
+  - Behavior diverges by backend, and the error has no location.
+
+[2026-02-23][lambda_eval][repro-008: constructor inference fails for let-bound ADT payload]
+- Complete file:
+  ```bend
+  type Tm() {
+    var{U32}
+    lam{Tm}
+    app{Tm, Tm}
+  }
+
+  def c_succ() -> Tm:
+    bod = app{var{1}, app{app{var{2}, var{1}}, var{0}}}
+    lam{lam{lam{bod}}}
+
+  def main() -> U32:
+    0
+  ```
+- Command:
+  - `bend repro-008.bend --to-core`
+  - `bend repro-008.bend --as-js`
+- Expected:
+  - Should compile; this is equivalent to inlining `bod` directly.
+- Actual:
+  - `--to-core` succeeds.
+  - `--as-js` fails with `error: can't infer constructor`.
+- Why this is wrong/confusing:
+  - A local ADT value cannot be reused in a constructor field even with explicit return type.
+  - The only workaround was inlining, which hurts readability and maintainability.
