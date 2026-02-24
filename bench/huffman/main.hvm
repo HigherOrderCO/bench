@@ -1,0 +1,244 @@
+// huffman/main.hvm
+// =================
+// Huffman encoding/decoding benchmark over pseudo-random symbols.
+// Manual port of bench/huffman/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 zero / nonzero to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Advances the linear-congruential generator state.
+@rng = λ&seed.
+  seed * 1664525 + 1013904223
+
+// Reverses a list using an accumulator.
+@rev = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @rev(xt, #cons{x, acc})
+}
+
+// Text Generation
+// ---------------
+
+// Generates pseudo-random symbols (0..7).
+@gen = λ{
+  0: λ&seed. λ&acc.
+    @rev(acc, #nil{});
+  λ&len. λ&seed. λ&acc.
+    ! &seed = @rng(seed);
+    ! sym   = (seed / 65536) % 8;
+    @gen(len - 1, seed, #cons{sym, acc})
+}
+
+// Frequency Counting
+// ------------------
+
+// Creates a list of `n` zeros.
+@zeros = λ{
+  0:
+    #nil{};
+  λ&n.
+    #cons{0, @zeros(n - 1)}
+}
+
+// Increments element at index `i`.
+@inc_at = λ{
+  #nil: λ&i.
+    #nil{};
+  #cons: λ&x. λ&xt. λ&i.
+    ! at = @u2b(i == 0);
+    @inc_put(at, x, xt, i)
+}
+
+// Places incremented value at correct index.
+@inc_put = λ{
+  #T: λ&x. λ&xt. λ&i.
+    #cons{x + 1, xt};
+  #F: λ&x. λ&xt. λ&i.
+    #cons{x, @inc_at(xt, i - 1)}
+}
+
+// Counts symbol frequencies in text.
+@freq = λ{
+  #nil: λ&arr.
+    arr;
+  #cons: λ&c. λ&rst. λ&arr.
+    @freq(rst, @inc_at(arr, c))
+}
+
+// Priority Queue
+// --------------
+
+// Inserts `(freq, tree)` into sorted position.
+@pq_ins = λ&f. λ&t. λ{
+  #pnil:
+    #pcons{f, t, #pnil{}};
+  #pcons: λ&f2. λ&t2. λ&rst.
+    ! le = @u2b(f <= f2);
+    @pq_cmp(le, f, t, f2, t2, rst)
+}
+
+// Places at correct position based on comparison.
+@pq_cmp = λ{
+  #F: λ&f. λ&t. λ&f2. λ&t2. λ&rst.
+    #pcons{f2, t2, @pq_ins(f, t, rst)};
+  #T: λ&f. λ&t. λ&f2. λ&t2. λ&rst.
+    #pcons{f, t, #pcons{f2, t2, rst}}
+}
+
+// Builds initial PQ from frequency array.
+@pq_from = λ{
+  #nil: λ&sym.
+    #pnil{};
+  #cons: λ&f. λ&rst. λ&sym.
+    ! pq   = @pq_from(rst, sym + 1);
+    ! skip = @u2b(f == 0);
+    @pq_add(skip, f, sym, pq)
+}
+
+// Adds symbol to PQ if frequency > 0.
+@pq_add = λ{
+  #T: λ&f. λ&sym. λ&pq.
+    pq;
+  #F: λ&f. λ&sym. λ&pq.
+    @pq_ins(f, #leaf{sym}, pq)
+}
+
+// Tree Construction
+// -----------------
+
+// Builds Huffman tree by repeated merging.
+@build = λ{
+  #pnil:
+    #leaf{0};
+  #pcons: λ&f1. λ&t1. λ&rst.
+    @build_step(f1, t1, rst)
+}
+
+// Merges two items or returns single remaining tree.
+@build_step = λ&f1. λ&t1. λ{
+  #pnil:
+    t1;
+  #pcons: λ&f2. λ&t2. λ&rst2.
+    ! pq = @pq_ins(f1 + f2, #node{t1, t2}, rst2);
+    @build(pq)
+}
+
+// Encoding
+// --------
+
+// Checks if symbol `c` exists in subtree.
+@has = λ&c. λ{
+  #leaf: λ&v.
+    c == v;
+  #node: λ&l. λ&r.
+    @has(c, l) + @has(c, r)
+}
+
+// Finds bit-path from root to symbol `c`.
+@path = λ&c. λ{
+  #leaf: λ&v.
+    #nil{};
+  #node: λ&l. λ&r.
+    ! in_left = @u2b(@has(c, l));
+    @path_dir(in_left, c, l, r)
+}
+
+// Follows the direction where `c` was found.
+@path_dir = λ{
+  #T: λ&c. λ&l. λ&r.
+    #cons{0, @path(c, l)};
+  #F: λ&c. λ&l. λ&r.
+    #cons{1, @path(c, r)}
+}
+
+// Prepends `xs` (reversed) onto accumulator.
+@rev_onto = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @rev_onto(xt, #cons{x, acc})
+}
+
+// Encodes text to bits.
+@encode = λ{
+  #nil: λ&tree. λ&acc.
+    @rev(acc, #nil{});
+  #cons: λ&c. λ&rst. λ&tree. λ&acc.
+    ! code = @path(c, tree);
+    ! acc  = @rev_onto(code, acc);
+    @encode(rst, tree, acc)
+}
+
+// Decoding
+// --------
+
+// Picks left or right subtree based on bit value.
+@pick = λ{
+  0: λ&l. λ&r.
+    l;
+  λ&b. λ&l. λ&r.
+    r
+}
+
+// Decodes bits back to symbols using the Huffman tree.
+@decode = λ{
+  #leaf: λ&c. λ&bits. λ&root. λ&acc.
+    @decode(root, bits, root, #cons{c, acc});
+  #node: λ&l. λ&r. λ&bits. λ&root. λ&acc.
+    @decode_bit(bits, l, r, root, acc)
+}
+
+// Consumes one bit and descends into the tree.
+@decode_bit = λ{
+  #nil: λ&l. λ&r. λ&root. λ&acc.
+    @rev(acc, #nil{});
+  #cons: λ&b. λ&rst. λ&l. λ&r. λ&root. λ&acc.
+    ! nxt = @pick(b, l, r);
+    @decode(nxt, rst, root, acc)
+}
+
+// Checksum
+// --------
+
+// Folds a list into a U32 checksum.
+@hash = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    ! acc = (acc ^ x) * 16777619 + 2166136261;
+    @hash(xt, acc)
+}
+
+// Benchmark
+// ---------
+
+// Runs repeated encode/decode rounds.
+@bench = λ{
+  0: λ&seed. λ&acc.
+    acc;
+  λ&rnd. λ&seed. λ&acc.
+    ! &text = @gen(500, seed, #nil{});
+    ! arr   = @freq(text, @zeros(8));
+    ! &tree = @build(@pq_from(arr, 0));
+    ! bits = @encode(text, tree, #nil{});
+    ! out  = @decode(tree, bits, tree, #nil{});
+    ! acc  = @hash(out, acc);
+    ! seed = @rng(seed);
+    @bench(rnd - 1, seed, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(640, 1, 0)

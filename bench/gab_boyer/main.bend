@@ -870,14 +870,14 @@ def lms() -> LmLs:
 #   w -> lessp(remainder(a,b), member(a, length(b)))
 # where a=v(5), b=v(6), c=v(7), d=v(8)
 
-def test_form() -> Term:
+def test_form(seed: U32) -> Term:
   a = vv(5)
   b = vv(6)
   c = vv(7)
   d = vv(8)
   # x,y in u's value are atom variables
-  vx = vv(0)
-  vy = vv(1)
+  vx = vv(seed)
+  vy = vv(seed + 1)
   # substituted values
   sx = f1(92, f2(5, f2(5, a, b), f2(5, c, f0(14))))
   sy = f1(92, f2(6, f2(6, a, b), f2(5, c, d)))
@@ -890,5 +890,13 @@ def test_form() -> Term:
 # Main
 # ----
 
+# Repeats tautology checking benchmark rounds and accumulates result.
+def bench(n: U32, acc: U32) -> U32:
+  match n:
+    case 0:
+      acc
+    case n:
+      bench(n - 1, acc + b2u(tautp(test_form(n), lms())))
+
 def main() -> U32:
-  b2u(tautp(test_form(), lms()))
+  bench(250000, 0)

@@ -1,0 +1,46 @@
+// mat_mul/main.hvm
+// ================
+// Matrix-like numeric kernel over U32 values with Nat-driven loops.
+// Manual port of bench/mat_mul/main.bend.
+
+// Dot
+// ---
+
+// Computes a pseudo dot-product step loop.
+@dot = λ{
+  0n: λ&x. λ&y. λ&acc.
+    acc;
+  1n+: λ&n. λ&x. λ&y. λ&acc.
+    ! mix = (x ^ y) * 2654435761;
+    @dot(n, x + 1664525, y + 1013904223, acc + mix)
+}
+
+// Row
+// ---
+
+// Computes one row accumulation across all columns.
+@row = λ{
+  0n: λ&dep. λ&row_sed. λ&col_sed. λ&acc.
+    acc;
+  1n+: λ&n. λ&dep. λ&row_sed. λ&col_sed. λ&acc.
+    ! cell = @dot(dep, row_sed, col_sed, 0);
+    @row(n, dep, row_sed + 374761393, col_sed + 668265263, acc ^ cell)
+}
+
+// Matmul-Like
+// -----------
+
+// Computes the matrix-like traversal across all rows.
+@matmul_like = λ{
+  0n: λ&cols. λ&dep. λ&sed. λ&acc.
+    acc;
+  1n+: λ&n. λ&cols. λ&dep. λ&sed. λ&acc.
+    ! row_sum = @row(cols, dep, sed, 1, 0);
+    @matmul_like(n, cols, dep, sed + 2246822519, acc + row_sum)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @matmul_like(208n, 208n, 208n, 1, 0)

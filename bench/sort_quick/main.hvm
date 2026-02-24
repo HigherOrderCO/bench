@@ -1,0 +1,153 @@
+// sort_quick/main.hvm
+// ===================
+// Pure functional quicksort over immutable U32 lists.
+// Manual port of bench/sort_quick/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 zero / nonzero to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Advances the linear-congruential generator state.
+@rng = λ&sed.
+  sed * 1664525 + 1013904223
+
+// Build
+// -----
+
+// Builds a list of pseudo-random U32 values.
+@gen = λ&len. λ&sed.
+  ! done = @u2b(len == 0);
+  @gen_go(done, len, sed)
+
+// Executes one build step.
+@gen_go = λ{
+  #T: λ&len. λ&sed.
+    #nil{};
+  #F: λ&len. λ&sed.
+    ! &val = @rng(sed);
+    #cons{val, @gen(len - 1, val)}
+}
+
+// Partition
+// ---------
+
+// Partitions list into elements <= pivot and > pivot.
+@part = λ&piv. λ{
+  #nil:
+    #pair{#nil{}, #nil{}};
+  #cons: λ&x. λ&xt.
+    ! le = @u2b(x <= piv);
+    ! p  = @part(piv, xt);
+    @part_put(le, x, p)
+}
+
+// Unpacks a partition pair.
+@part_put = λ&le. λ&x. λ{
+  #pair: λ&lo. λ&hi.
+    @part_ins(le, x, lo, hi)
+}
+
+// Inserts one element into the correct side.
+@part_ins = λ{
+  #T: λ&x. λ&lo. λ&hi.
+    #pair{#cons{x, lo}, hi};
+  #F: λ&x. λ&lo. λ&hi.
+    #pair{lo, #cons{x, hi}}
+}
+
+// Append
+// ------
+
+// Appends two lists.
+@app = λ{
+  #nil: λ&ys.
+    ys;
+  #cons: λ&x. λ&xt. λ&ys.
+    #cons{x, @app(xt, ys)}
+}
+
+// Sort
+// ----
+
+// Sorts a list with quicksort (head as pivot).
+@sort = λ{
+  #nil:
+    #nil{};
+  #cons: λ&x. λ&xt.
+    ! p = @part(x, xt);
+    @sort_pair(x, p)
+}
+
+// Sorts both halves and combines with pivot in-between.
+@sort_pair = λ&piv. λ{
+  #pair: λ&lo. λ&hi.
+    ! lo = @sort(lo);
+    ! hi = @sort(hi);
+    @app(lo, #cons{piv, hi})
+}
+
+// Hash
+// ----
+
+// Folds a list into a U32 checksum.
+@hash = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    ! acc = (acc ^ x) * 16777619 + 2166136261;
+    @hash(xt, acc)
+}
+
+// Bench
+// -----
+
+// Runs one build + sort + hash step.
+@step = λ&sed. λ&acc.
+  ! xs  = @gen(2048, sed);
+  ! ys  = @sort(xs);
+  ! acc = @hash(ys, acc ^ sed);
+  ! sed = @rng(sed);
+  #st{sed, acc}
+
+// Advances one step from a state.
+@step_st = λ{
+  #st: λ&sed. λ&acc.
+    @step(sed, acc)
+}
+
+// Runs repeated benchmark rounds.
+@bench = λ&rnd. λ&sed. λ&acc.
+  ! done = @u2b(rnd == 0);
+  @bench_go(done, rnd, sed, acc)
+
+// Runs one benchmark round.
+@bench_go = λ{
+  #T: λ&rnd. λ&sed. λ&acc.
+    acc;
+  #F: λ&rnd. λ&sed. λ&acc.
+    ! s   = @step(sed, acc);
+    ! s   = @step_st(s);
+    ! s   = @step_st(s);
+    ! s   = @step_st(s);
+    ! rnd = rnd - 1;
+    @bench_take(rnd, s)
+}
+
+// Continues benchmark from a computed state.
+@bench_take = λ&rnd. λ{
+  #st: λ&sed. λ&acc.
+    @bench(rnd, sed, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(36, 1, 0)

@@ -34,4 +34,4 @@ def matmul_like(rows: Nat, cols: Nat, depth: Nat, seed: U32, acc: U32) -> U32:
       matmul_like(p, cols, depth, seed + 2246822519, acc + row_sum)
 
 def main() -> U32:
-  matmul_like(256n, 256n, 256n, 1, 0)
+  matmul_like(208n, 208n, 208n, 1, 0)

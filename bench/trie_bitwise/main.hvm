@@ -1,0 +1,239 @@
+// trie_bitwise/main.hvm
+// =====================
+// Pure functional persistent bitwise trie benchmark over U32 keys.
+// Manual port of bench/trie_bitwise/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 (0 / nonzero) to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Advances the linear-congruential generator state.
+@rng = λ&sed.
+  sed * 1664525 + 1013904223
+
+// Reads one bit from `key` at shift position `sh`.
+@key_bit = λ&key. λ&sh.
+  (key >> sh) && 1
+
+// Trie Insert
+// -----------
+
+// Inserts or replaces `key -> val` at depth `dep`.
+@ins = λ&t. λ&key. λ&val. λ&dep.
+  ! done = @u2b(dep == 0);
+  @ins_go(done, t, key, val, dep)
+
+// Dispatches leaf/internal insertion.
+@ins_go = λ{
+  #T: λ&t. λ&key. λ&val. λ&dep.
+    @ins_leaf(t, val);
+  #F: λ&t. λ&key. λ&val. λ&dep.
+    ! &dep = dep - 1;
+    ! bit  = @key_bit(key, dep);
+    @ins_bit(bit, t, key, val, dep)
+}
+
+// Sets the value at the current trie node.
+@ins_leaf = λ{
+  #emp: λ&val.
+    #nod{#some{val}, #emp{}, #emp{}};
+  #nod: λ&mb. λ&l. λ&r. λ&val.
+    #nod{#some{val}, l, r}
+}
+
+// Branches insertion on bit value.
+@ins_bit = λ{
+  0: λ&t. λ&key. λ&val. λ&dep.
+    @ins_lft(t, key, val, dep);
+  λ&x. λ&t. λ&key. λ&val. λ&dep.
+    @ins_rgt(t, key, val, dep)
+}
+
+// Inserts into the left branch.
+@ins_lft = λ{
+  #emp: λ&key. λ&val. λ&dep.
+    ! l = @ins(#emp{}, key, val, dep);
+    #nod{#none{}, l, #emp{}};
+  #nod: λ&mb. λ&l. λ&r. λ&key. λ&val. λ&dep.
+    ! l = @ins(l, key, val, dep);
+    #nod{mb, l, r}
+}
+
+// Inserts into the right branch.
+@ins_rgt = λ{
+  #emp: λ&key. λ&val. λ&dep.
+    ! r = @ins(#emp{}, key, val, dep);
+    #nod{#none{}, #emp{}, r};
+  #nod: λ&mb. λ&l. λ&r. λ&key. λ&val. λ&dep.
+    ! r = @ins(r, key, val, dep);
+    #nod{mb, l, r}
+}
+
+// Trie Lookup
+// -----------
+
+// Looks up a key at depth `dep`, defaulting to 0 when absent.
+@get = λ&t. λ&key. λ&dep.
+  ! done = @u2b(dep == 0);
+  @get_go(done, t, key, dep)
+
+// Dispatches leaf/internal lookup.
+@get_go = λ{
+  #T: λ&t. λ&key. λ&dep.
+    @get_leaf(t);
+  #F: λ&t. λ&key. λ&dep.
+    ! &dep = dep - 1;
+    ! bit  = @key_bit(key, dep);
+    @get_bit(bit, t, key, dep)
+}
+
+// Returns value at current node, or 0 if absent.
+@get_leaf = λ{
+  #emp:
+    0;
+  #nod: λ&mb. λ&l. λ&r.
+    @mb_u32(mb)
+}
+
+// Converts maybe-value to U32.
+@mb_u32 = λ{
+  #none:
+    0;
+  #some: λ&v.
+    v
+}
+
+// Branches lookup on bit value.
+@get_bit = λ{
+  0: λ&t. λ&key. λ&dep.
+    @get_lft(t, key, dep);
+  λ&x. λ&t. λ&key. λ&dep.
+    @get_rgt(t, key, dep)
+}
+
+// Looks up in left branch.
+@get_lft = λ{
+  #emp: λ&key. λ&dep.
+    0;
+  #nod: λ&mb. λ&l. λ&r. λ&key. λ&dep.
+    @get(l, key, dep)
+}
+
+// Looks up in right branch.
+@get_rgt = λ{
+  #emp: λ&key. λ&dep.
+    0;
+  #nod: λ&mb. λ&l. λ&r. λ&key. λ&dep.
+    @get(r, key, dep)
+}
+
+// Trie Fold
+// ---------
+
+// Folds trie contents into a checksum.
+@fold = λ{
+  #emp: λ&acc.
+    acc;
+  #nod: λ&mb. λ&l. λ&r. λ&acc.
+    ! acc = @fold_mb(mb, acc);
+    ! acc = @fold(l, acc * 16777619 + 2166136261);
+    @fold(r, acc * 2246822519 + 3266489917)
+}
+
+// Mixes one optional value into checksum.
+@fold_mb = λ{
+  #none: λ&acc.
+    acc;
+  #some: λ&v. λ&acc.
+    (acc ^ v) * 2654435761 + 1013904223
+}
+
+// Benchmark
+// ---------
+
+// Builds a trie from pseudo-random key/value pairs.
+@build = λ&n. λ&seed. λ&t.
+  ! done = @u2b(n == 0);
+  @build_go(done, n, seed, t)
+
+// Runs one build step and recurs.
+@build_go = λ{
+  #T: λ&n. λ&seed. λ&t.
+    t;
+  #F: λ&n. λ&seed. λ&t.
+    ! &key = @rng(seed);
+    ! &val = @rng(key);
+    ! t    = @ins(t, key, val, 20);
+    ! n    = n - 1;
+    ! seed = @rng(val);
+    @build(n, seed, t)
+}
+
+// Runs lookup queries and accumulates hits.
+@query = λ&n. λ&seed. λ&t. λ&acc.
+  ! done = @u2b(n == 0);
+  @query_go(done, n, seed, t, acc)
+
+// Runs one lookup step and recurs.
+@query_go = λ{
+  #T: λ&n. λ&seed. λ&t. λ&acc.
+    acc;
+  #F: λ&n. λ&seed. λ&t. λ&acc.
+    ! key  = @rng(seed);
+    ! hit  = @get(t, key, 20);
+    ! acc  = (acc ^ hit) + seed;
+    ! n    = n - 1;
+    ! seed = @rng(seed);
+    @query(n, seed, t, acc)
+}
+
+// Runs one full round and returns the next benchmark state.
+@round = λ&seed. λ&acc.
+  ! &t   = @build(1200, seed, #emp{});
+  ! acc  = @query(1600, @rng(seed), t, acc);
+  ! acc  = @fold(t, acc);
+  ! seed = @rng(seed);
+  #st{seed, acc}
+
+// Runs one full round from an existing benchmark state.
+@round_st = λ{
+  #st: λ&seed. λ&acc.
+    @round(seed, acc)
+}
+
+// Runs full trie workload rounds.
+@bench = λ&rounds. λ&seed. λ&acc.
+  ! done = @u2b(rounds == 0);
+  @bench_go(done, rounds, seed, acc)
+
+// Runs one benchmark round and recurs.
+@bench_go = λ{
+  #T: λ&rounds. λ&seed. λ&acc.
+    acc;
+  #F: λ&rounds. λ&seed. λ&acc.
+    ! s      = @round(seed, acc);
+    ! s      = @round_st(s);
+    ! s      = @round_st(s);
+    ! s      = @round_st(s);
+    ! rounds = rounds - 1;
+    @bench_take(rounds, s)
+}
+
+// Continues benchmark recursion from a state pair.
+@bench_take = λ&rounds. λ{
+  #st: λ&seed. λ&acc.
+    @bench(rounds, seed, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(4, 1, 0)

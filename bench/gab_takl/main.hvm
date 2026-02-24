@@ -1,0 +1,74 @@
+// gab_takl/main.hvm
+// =================
+// Gabriel TAKL benchmark (Takeuchi, 1978).
+// Manual port of bench/gab_takl/main.bend.
+
+// List
+// ----
+
+// Builds the list [n, n-1, ..., 1].
+@listn = λ{
+  0n:
+    #nil{};
+  1n+: λ&p.
+    #cons{1n + p, @listn(p)}
+}
+
+// Returns the tail of a list, or empty for empty input.
+@tail = λ{
+  #nil:
+    #nil{};
+  #cons: λ&h. λ&t.
+    t
+}
+
+// Checks whether list `x` is strictly shorter than list `y`.
+@shorterp = λ{
+  #nil: λ{
+    #nil:
+      #F{};
+    #cons: λ&h. λ&t.
+      #T{}
+  };
+  #cons: λ&xh. λ&xt. λ{
+    #nil:
+      #F{};
+    #cons: λ&yh. λ&yt.
+      @shorterp(xt, yt)
+  }
+}
+
+// MAS
+// ---
+
+// Dispatches based on the `shorterp` comparison result.
+@mas_go = λ{
+  #F: λ&x. λ&y. λ&z.
+    z;
+  #T: λ&x. λ&y. λ&z.
+    ! a = @mas(@tail(x), y, z);
+    ! b = @mas(@tail(y), z, x);
+    ! c = @mas(@tail(z), x, y);
+    @mas(a, b, c)
+}
+
+// Computes TAKL over lists.
+@mas = λ&x. λ&y. λ&z.
+  @mas_go(@shorterp(y, x), x, y, z)
+
+// Len
+// ---
+
+// Computes list length as U32.
+@len = λ{
+  #nil:
+    0;
+  #cons: λ&h. λ&t.
+    @len(t) + 1
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @len(@mas(@listn(270n), @listn(264n), @listn(258n)))

@@ -1,0 +1,65 @@
+// gab_tak/main.hvm
+// ================
+// Gabriel TAK benchmark (Takeuchi, 1978).
+// Manual port of bench/gab_tak/main.bend.
+
+// Pred
+// ----
+
+// Computes predecessor of a natural number.
+@pred = λ{
+  0n:
+    0n;
+  1n+: λ&p.
+    p
+}
+
+// LTE
+// ---
+
+// Checks whether `a <= b`.
+@lte = λ{
+  0n: λ&b.
+    #T{};
+  1n+: λ&p. λ{
+    0n:
+      #F{};
+    1n+: λ&q.
+      @lte(p, q)
+  }
+}
+
+// TAK
+// ---
+
+// Dispatches TAK based on the comparison result.
+@tak_go = λ{
+  #T: λ&x. λ&y. λ&z.
+    y;
+  #F: λ&x. λ&y. λ&z.
+    ! a = @tak(@pred(x), y, z);
+    ! b = @tak(@pred(y), z, x);
+    ! c = @tak(@pred(z), x, y);
+    @tak(a, b, c)
+}
+
+// Computes the Takeuchi function.
+@tak = λ&x. λ&y. λ&z.
+  @tak_go(@lte(x, y), x, y, z)
+
+// U32
+// ---
+
+// Converts a Nat to U32.
+@u32_to = λ{
+  0n:
+    0;
+  1n+: λ&p.
+    @u32_to(p) + 1
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @u32_to(@tak(56n, 50n, 44n))

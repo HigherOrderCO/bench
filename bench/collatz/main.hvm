@@ -1,0 +1,39 @@
+// collatz/main.hvm
+// ================
+// Computes total Collatz stopping-steps over [1..N].
+// Manual port of bench/collatz/main.bend.
+
+// Steps
+// -----
+
+// Counts steps to reach 1 from `n`, accumulating in `acc`.
+@steps = λ{
+  1: λ&acc.
+    acc;
+  λ&k. λ&acc.
+    ! rem = k % 2;
+    λ{
+      0:
+        @steps(k / 2, acc + 1);
+      λ&r.
+        @steps(k * 3 + 1, acc + 1)
+    }(rem)
+}
+
+// Total
+// -----
+
+// Sums `steps(k, 0)` for every `k` in [1..n].
+@total = λ{
+  0: λ&acc.
+    acc;
+  λ&k. λ&acc.
+    ! sum = acc + @steps(k, 0);
+    @total(k - 1, sum)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @total(500000, 0)

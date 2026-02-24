@@ -1,0 +1,97 @@
+// prime_sieve/main.hvm
+// ====================
+// Sieve of Eratosthenes on a linked list of U32 values.
+// Manual port of bench/prime_sieve/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 zero / nonzero to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Reverses a list with tail-recursive accumulator.
+@rev = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @rev(xt, #cons{x, acc})
+}
+
+// Range
+// -----
+
+// Builds [cur-n .. cur] as a list.
+@range = λ{
+  0: λ&cur. λ&acc.
+    #cons{cur, acc};
+  λ&n. λ&cur. λ&acc.
+    @range(n - 1, cur - 1, #cons{cur, acc})
+}
+
+// Filter
+// ------
+
+// Conditionally prepends `x` to `acc`.
+@maybe_cons = λ{
+  #F: λ&x. λ&acc.
+    acc;
+  #T: λ&x. λ&acc.
+    #cons{x, acc}
+}
+
+// Filters out multiples of `p` from a list.
+@filter = λ&p. λ{
+  #nil: λ&acc.
+    @rev(acc, #nil{});
+  #cons: λ&x. λ&xt. λ&acc.
+    ! keep = @u2b(x % p);
+    ! acc  = @maybe_cons(keep, x, acc);
+    @filter(p, xt, acc)
+}
+
+// Sieve
+// -----
+
+// Runs the sieve by repeatedly filtering with the head prime.
+@sieve = λ{
+  #nil: λ&primes. λ&max.
+    primes;
+  #cons: λ&p. λ&rst. λ&primes. λ&max.
+    ! cont = @u2b(p * p <= max);
+    @sieve_chk(cont, p, rst, primes, max)
+}
+
+// Continues filtering while p*p <= max; otherwise appends remaining.
+@sieve_chk = λ{
+  #T: λ&p. λ&rst. λ&primes. λ&max.
+    ! flt = @filter(p, rst, #nil{});
+    @sieve(flt, #cons{p, primes}, max);
+  #F: λ&p. λ&rst. λ&primes. λ&max.
+    @rev(#cons{p, rst}, primes)
+}
+
+// Hash
+// ----
+
+// Folds a list into a U32 checksum.
+@hash = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    ! acc = (acc ^ x) * 16777619 + 2166136261;
+    @hash(xt, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main =
+  ! xs = @range(279998, 280000, #nil{});
+  ! ps = @sieve(xs, #nil{}, 280000);
+  @hash(ps, 0)

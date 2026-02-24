@@ -1,0 +1,186 @@
+// edit_dist/main.hvm
+// ==================
+// Pure functional Levenshtein distance benchmark over U32 sequences.
+// Manual port of bench/edit_dist/main.bend.
+
+// Utils
+// -----
+
+// Advances the linear-congruential generator state.
+@rng = λ&sed.
+  sed * 1664525 + 1013904223
+
+// Returns the minimum of two U32 values.
+@min2 = λ&a. λ&b.
+  λ{
+    0: b;
+    λ&x. a
+  }(a <= b)
+
+// Returns the minimum of three U32 values.
+@min3 = λ&a. λ&b. λ&c.
+  @min2(@min2(a, b), c)
+
+// Returns 1 when values differ, else 0.
+@neq_u32 = λ&a. λ&b.
+  λ{
+    0: 0;
+    λ&x. 1
+  }(a != b)
+
+// Reverses a list using an accumulator.
+@rev = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @rev(xt, #cons{x, acc})
+}
+
+// Returns the final element of a non-empty row.
+@last = λ{
+  #nil:
+    0;
+  #cons: λ&x. λ&xt.
+    @last_go(x, xt)
+}
+
+// Scans to the final element of a non-empty suffix.
+@last_go = λ&x. λ{
+  #nil:
+    x;
+  #cons: λ&y. λ&yt.
+    @last_go(y, yt)
+}
+
+// Sequence Build
+// --------------
+
+// Builds a pseudo-random U32 sequence of length `len`.
+@gen = λ&len. λ&sed.
+  λ{
+    0: @gen_go(len, sed);
+    λ&x. #nil{}
+  }(len == 0)
+
+// Builds one random element and recurs.
+@gen_go = λ&len. λ&sed.
+  ! &sed = @rng(sed);
+  ! val  = sed % 26;
+  ! len  = len - 1;
+  #cons{val, @gen(len, sed)}
+
+// Returns sequence length as U32.
+@len = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @len(xt, acc + 1)
+}
+
+// Builds an initial DP row [0, 1, ..., n].
+@init_row = λ&n.
+  @init_row_go(0, n)
+
+// Builds one cell of the initial row.
+@init_row_go = λ&i. λ&n.
+  λ{
+    0: @init_row_step(i, n);
+    λ&x. #cons{i, #nil{}}
+  }(i == n)
+
+// Builds the recursive branch for initial row construction.
+@init_row_step = λ&i. λ&n.
+  #cons{i, @init_row_go(i + 1, n)}
+
+// Edit Distance
+// -------------
+
+// Scans one row cell-by-cell and returns the completed row.
+@row_scan = λ&x. λ{
+  #nil: λ&ups. λ&diag. λ&left. λ&rev_row.
+    @rev(rev_row, #nil{});
+  #cons: λ&y. λ&yt. λ{
+    #nil: λ&diag. λ&left. λ&rev_row.
+      @rev(rev_row, #nil{});
+    #cons: λ&up. λ&ut. λ&diag. λ&left. λ&rev_row.
+      ! ins   = left + 1;
+      ! del   = up + 1;
+      ! sub   = diag + @neq_u32(x, y);
+      ! &cur  = @min3(ins, del, sub);
+      @row_scan(x, yt, ut, up, cur, #cons{cur, rev_row})
+  }
+}
+
+// Builds the next DP row for one source character.
+@build_row = λ&x. λ&ys. λ{
+  #nil: λ&i.
+    #cons{i, #nil{}};
+  #cons: λ&p0. λ&pt. λ&i.
+    @row_scan(x, ys, pt, p0, i, #cons{i, #nil{}})
+}
+
+// Iterates source rows and returns final edit distance.
+@dist_rows = λ{
+  #nil: λ&ys. λ&prev. λ&i.
+    @last(prev);
+  #cons: λ&x. λ&xt. λ&ys. λ&prev. λ&i.
+    ! row = @build_row(x, ys, prev, i);
+    @dist_rows(xt, ys, row, i + 1)
+}
+
+// Computes Levenshtein distance between two sequences.
+@dist = λ&xs. λ&ys.
+  ! n   = @len(ys, 0);
+  ! row = @init_row(n);
+  @dist_rows(xs, ys, row, 1)
+
+// Benchmark
+// ---------
+
+// Runs one edit-distance round and returns next state.
+@round = λ&seed. λ&acc.
+  ! &a_seed = @rng(seed);
+  ! &b_seed = @rng(a_seed);
+  ! &c_seed = @rng(b_seed);
+  ! a       = @gen(144, a_seed);
+  ! &b      = @gen(144, b_seed);
+  ! c       = @gen(144, c_seed);
+  ! d0      = @dist(a, b);
+  ! d1      = @dist(b, c);
+  ! acc     = (acc ^ d0) + d1 * 131 + seed;
+  ! seed    = @rng(c_seed);
+  #st{seed, acc}
+
+// Runs one round from an existing benchmark state.
+@round_st = λ{
+  #st: λ&seed. λ&acc.
+    @round(seed, acc)
+}
+
+// Runs benchmark rounds.
+@bench = λ&rounds. λ&seed. λ&acc.
+  λ{
+    0: @bench_go(rounds, seed, acc);
+    λ&x. acc
+  }(rounds == 0)
+
+// Runs four rounds per recursion step.
+@bench_go = λ&rounds. λ&seed. λ&acc.
+  ! s      = @round(seed, acc);
+  ! s      = @round_st(s);
+  ! s      = @round_st(s);
+  ! s      = @round_st(s);
+  ! rounds = rounds - 1;
+  @bench_take(rounds, s)
+
+// Continues benchmark recursion from a state pair.
+@bench_take = λ&rounds. λ{
+  #st: λ&seed. λ&acc.
+    @bench(rounds, seed, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(11, 1, 0)

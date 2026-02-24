@@ -83,4 +83,4 @@ def loop(n: Nat, acc: U32) -> U32:
       loop(p, acc + size(deriv(test_expr())))
 
 def main() -> U32:
-  loop(200n, 0)
+  loop(400000n, 0)

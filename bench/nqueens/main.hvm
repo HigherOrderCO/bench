@@ -1,0 +1,90 @@
+// nqueens/main.hvm
+// ================
+// Pure functional N-Queens benchmark over U32 bitsets.
+// Manual port of bench/nqueens/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 (0 / nonzero) to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Builds a mask with the low `n` bits set.
+@low_mask = λ&n.
+  (1 << n) - 1
+
+// Solve
+// -----
+
+// Counts N-Queens solutions for board size `n`.
+@solve_n = λ&n.
+  ! all = @low_mask(n);
+  @solve(all, 0, 0, 0)
+
+// Solves from a partial placement state.
+@solve = λ&all. λ&cols. λ&diag_l. λ&diag_r.
+  ! done = @u2b(cols == all);
+  @solve_go(done, all, cols, diag_l, diag_r)
+
+// Returns 1 when all rows are placed, else iterates free bits.
+@solve_go = λ{
+  #T: λ&all. λ&cols. λ&diag_l. λ&diag_r.
+    1;
+  #F: λ&all. λ&cols. λ&diag_l. λ&diag_r.
+    ! used = cols || diag_l || diag_r;
+    ! free = all ^ used;
+    @pick(all, cols, diag_l, diag_r, free, 0)
+}
+
+// Pick
+// ----
+
+// Iterates all candidate bits for the current row.
+@pick = λ&all. λ&cols. λ&diag_l. λ&diag_r. λ&bits. λ&acc.
+  ! done = @u2b(bits == 0);
+  @pick_go(done, all, cols, diag_l, diag_r, bits, acc)
+
+// Explores one candidate and recurs on remaining candidates.
+@pick_go = λ{
+  #T: λ&all. λ&cols. λ&diag_l. λ&diag_r. λ&bits. λ&acc.
+    acc;
+  #F: λ&all. λ&cols. λ&diag_l. λ&diag_r. λ&bits. λ&acc.
+    ! &bit  = bits && (0 - bits);
+    ! bits  = bits - bit;
+    ! cols2 = cols || bit;
+    ! l2    = ((diag_l || bit) << 1) && all;
+    ! r2    = ((diag_r || bit) >> 1) && all;
+    ! acc   = acc + @solve(all, cols2, l2, r2);
+    @pick(all, cols, diag_l, diag_r, bits, acc)
+}
+
+// Bench
+// -----
+
+// Repeats the benchmark rounds and mixes the results.
+@bench = λ&rounds. λ&acc.
+  ! done = @u2b(rounds == 0);
+  @bench_go(done, rounds, acc)
+
+// Runs one benchmark round.
+@bench_go = λ{
+  #T: λ&rounds. λ&acc.
+    acc;
+  #F: λ&rounds. λ&acc.
+    ! s12    = @solve_n(11);
+    ! s13    = @solve_n(12);
+    ! acc    = (acc ^ s12) + s13 * 97;
+    ! rounds = rounds - 1;
+    @bench(rounds, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(1, 0)

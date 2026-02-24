@@ -1,0 +1,79 @@
+// gab_deriv/main.hvm
+// ==================
+// Gabriel DERIV benchmark (Gabriel, 1985).
+// Manual port of bench/gab_deriv/main.bend.
+
+// Deriv
+// -----
+
+// Differentiates an expression with respect to the single variable.
+@deriv = λ{
+  #var:
+    #con{1};
+  #con: λ&v.
+    #con{0};
+  #add: λ&a. λ&b.
+    #add{@deriv(a), @deriv(b)};
+  #sub: λ&a. λ&b.
+    #sub{@deriv(a), @deriv(b)};
+  #mul: λ&a. λ&b.
+    ! da = @deriv(a);
+    ! db = @deriv(b);
+    #add{#mul{da, b}, #mul{a, db}};
+  #div: λ&a. λ&b.
+    ! da = @deriv(a);
+    ! db = @deriv(b);
+    #div{#sub{#mul{da, b}, #mul{a, db}}, #mul{b, b}}
+}
+
+// Size
+// ----
+
+// Counts nodes in an expression tree.
+@size = λ{
+  #var:
+    1;
+  #con: λ&v.
+    1;
+  #add: λ&a. λ&b.
+    @size(a) + @size(b) + 1;
+  #sub: λ&a. λ&b.
+    @size(a) + @size(b) + 1;
+  #mul: λ&a. λ&b.
+    @size(a) + @size(b) + 1;
+  #div: λ&a. λ&b.
+    @size(a) + @size(b) + 1
+}
+
+// Test Expr
+// ---------
+
+// Test expression: 3*x*x + 10*x*x + 20*x + 5.
+@test_expr =
+  #add{
+    #mul{#con{3}, #mul{#var{}, #var{}}},
+    #add{
+      #mul{#con{10}, #mul{#var{}, #var{}}},
+      #add{
+        #mul{#con{20}, #var{}},
+        #con{5}
+      }
+    }
+  }
+
+// Loop
+// ----
+
+// Differentiates `n` times, summing sizes to force evaluation.
+@loop = λ{
+  0n: λ&acc.
+    acc;
+  1n+: λ&p. λ&acc.
+    @loop(p, acc + @size(@deriv(@test_expr)))
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @loop(400000n, 0)

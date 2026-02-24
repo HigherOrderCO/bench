@@ -83,8 +83,8 @@ def bench_go(done: Bool, rounds: U32, acc: U32) -> U32:
     case T{}:
       acc
     case F{}:
-      s12    = solve_n(12)
-      s13    = solve_n(13)
+      s12    = solve_n(11)
+      s13    = solve_n(12)
       acc    = (acc ^ s12) + s13 * 97
       rounds = rounds - 1
       bench(rounds, acc)
@@ -94,4 +94,4 @@ def bench_go(done: Bool, rounds: U32, acc: U32) -> U32:
 
 # Entry point.
 def main() -> U32:
-  bench(14, 0)
+  bench(1, 0)

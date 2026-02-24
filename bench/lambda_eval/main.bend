@@ -236,9 +236,9 @@ def eval_expr(a: Tm, b: Tm, c: Tm) -> U32:
 
 # Runs one benchmark round and returns next state.
 def round(seed: U32, acc: U32) -> St:
-  na   = 20 + seed % 4
-  nb   = 19 + (seed >> 3) % 4
-  nc   = 17 + (seed >> 5) % 3
+  na   = 19 + seed % 4
+  nb   = 18 + (seed >> 3) % 4
+  nc   = 16 + (seed >> 5) % 3
   r0   = eval_expr(church(na), church(nb), church(nc))
   r1   = eval_expr(church(nb), church(nc), church(na))
   acc  = (acc ^ r0) * 16777619 + r1 * 131 + seed
@@ -279,4 +279,4 @@ def bench_take(rounds: U32, s: St) -> U32:
 
 # Entry point.
 def main() -> U32:
-  bench(12, 1, 0)
+  bench(1, 1, 0)

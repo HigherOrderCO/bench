@@ -1,0 +1,80 @@
+// queue_bank/main.hvm
+// ===================
+// Banker's queue benchmark with repeated fill + drain rounds.
+// Manual port of bench/queue_bank/main.bend.
+
+// RNG
+// ---
+
+// Advances the linear-congruential generator state.
+@rng = λ&sed.
+  sed * 1664525 + 1013904223
+
+// Reverse
+// -------
+
+// Reverses `xs` into accumulator `acc`.
+@rev = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @rev(xt, #cons{x, acc})
+}
+
+// Fill
+// ----
+
+// Enqueues `n` pseudo-random values into a queue.
+@fill = λ&f. λ&b. λ{
+  0: λ&sed.
+    #queue{f, b};
+  λ&n. λ&sed.
+    ! &sed = @rng(sed);
+    @fill(f, #cons{sed, b}, n - 1, sed)
+}
+
+// Drain
+// -----
+
+// Drains the front list and folds checksum into `acc`.
+@drain_f = λ{
+  #cons: λ&x. λ&xt. λ&b. λ&acc.
+    ! acc = (acc ^ x) * 16777619 + 2166136261;
+    @drain_f(xt, b, acc);
+  #nil: λ&b. λ&acc.
+    @drain_b(b, acc)
+}
+
+// Reverses back-list when needed and continues draining.
+@drain_b = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    @drain_f(@rev(xt, #cons{x, #nil{}}), #nil{}, acc)
+}
+
+// Bench
+// -----
+
+// Runs repeated fill + drain rounds.
+@bench = λ{
+  0: λ&siz. λ&sed. λ&acc.
+    acc;
+  λ&rnd. λ&siz. λ&sed. λ&acc.
+    ! q   = @fill(#nil{}, #nil{}, siz, sed);
+    ! acc = @drain_q(q, acc);
+    ! &sed = @rng(sed);
+    @bench(rnd - 1, siz, sed, acc)
+}
+
+// Unpacks a queue and drains it.
+@drain_q = λ{
+  #queue: λ&f. λ&b. λ&acc.
+    @drain_f(f, b, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(400, 512, 1, 0)

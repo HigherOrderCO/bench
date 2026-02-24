@@ -105,6 +105,6 @@ def hash(xs: Lst, acc: U32) -> U32:
 
 # Entry point
 def main() -> U32:
-  xs     = range(1499999, 1500001, [])
-  primes = sieve(xs, [], 1500001)
+  xs     = range(279998, 280000, [])
+  primes = sieve(xs, [], 280000)
   hash(primes, 0)

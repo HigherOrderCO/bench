@@ -1,0 +1,73 @@
+// graph_color/main.hvm
+// ====================
+// Counts valid 3-colorings of a pseudo-random graph via backtracking.
+// Manual port of bench/graph_color/main.bend.
+
+// Utils
+// -----
+
+// Returns 1 if `num` is zero, else 0.
+@is_zero = λ{
+  0:
+    1;
+  λ&num.
+    0
+}
+
+// Graph
+// -----
+
+// Returns 1 if an edge exists between nodes `i` and `j`.
+@edge = λ&i. λ&j.
+  ! a = (i + j + 1) * 17;
+  ! b = (i * j + 1) * 31;
+  @is_zero((a ^ b) % 5)
+
+// Coloring
+// --------
+
+// Checks if assigning `col` to `nod` conflicts with prior assignments.
+@valid = λ&nod. λ&col. λ{
+  #nil: λ&idx.
+    1;
+  #cons: λ&c. λ&rst. λ&idx.
+    ! conf = @edge(nod, idx) * (c == col);
+    ! ok   = @is_zero(conf);
+    ok * @valid(nod, col, rst, idx - 1)
+}
+
+// Tries one color for `nod`; returns count of valid extensions.
+@try_color = λ&n. λ&nod. λ&col. λ&cs.
+  ! ok = @valid(nod, col, cs, nod - 1);
+  ok * @solve(n, nod + 1, #cons{col, cs})
+
+// Counts all valid 3-colorings by trying each color at each node.
+@solve = λ&n. λ&nod. λ&cs.
+  ! rem = n - nod;
+  λ{
+    0:
+      1;
+    λ&k.
+      ! c0 = @try_color(n, nod, 0, cs);
+      ! c1 = @try_color(n, nod, 1, cs);
+      ! c2 = @try_color(n, nod, 2, cs);
+      c0 + c1 + c2
+  }(rem)
+
+// Bench
+// -----
+
+// Runs coloring `rnd` times, accumulating results.
+@bench = λ{
+  0: λ&n. λ&acc.
+    acc;
+  λ&rnd. λ&n. λ&acc.
+    ! cnt = @solve(n, 0, #nil{});
+    @bench(rnd - 1, n, acc + cnt)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(4, 11, 0)

@@ -83,4 +83,4 @@ def len(l: Lst) -> U32:
       len(t) + 1
 
 def main() -> U32:
-  len(mas(listn(18n), listn(12n), listn(6n)))
+  len(mas(listn(270n), listn(264n), listn(258n)))

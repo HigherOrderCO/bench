@@ -68,4 +68,4 @@ def u32_to(n: Nat) -> U32:
       u32_to(p) + 1
 
 def main() -> U32:
-  u32_to(tak(18n, 12n, 6n))
+  u32_to(tak(56n, 50n, 44n))

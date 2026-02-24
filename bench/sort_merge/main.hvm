@@ -1,0 +1,167 @@
+// sort_merge/main.hvm
+// ===================
+// Pure functional merge-sort benchmark over immutable U32 lists.
+// Manual port of bench/sort_merge/main.bend.
+
+// Utils
+// -----
+
+// Converts U32 zero / nonzero to Bool.
+@u2b = λ{
+  0:
+    #F{};
+  λ&x.
+    #T{}
+}
+
+// Advances the linear-congruential generator state.
+@rng = λ&sed.
+  sed * 1664525 + 1013904223
+
+// Build
+// -----
+
+// Builds a list of pseudo-random U32 values.
+@gen = λ&len. λ&sed.
+  ! done = @u2b(len == 0);
+  @gen_go(done, len, sed)
+
+// Executes one build step.
+@gen_go = λ{
+  #T: λ&len. λ&sed.
+    #nil{};
+  #F: λ&len. λ&sed.
+    ! &val = @rng(sed);
+    ! len  = len - 1;
+    #cons{val, @gen(len, val)}
+}
+
+// Split
+// -----
+
+// Splits a list into two lists by alternating elements.
+@split = λ{
+  #nil:
+    #sp{#nil{}, #nil{}};
+  #cons: λ&x. λ{
+    #nil:
+      #sp{#cons{x, #nil{}}, #nil{}};
+    #cons: λ&y. λ&ys.
+      ! p = @split(ys);
+      @split_pair(x, y, p)
+  }
+}
+
+// Prepends extracted pair onto recursive split result.
+@split_pair = λ&x. λ&y. λ{
+  #sp: λ&xs. λ&ys.
+    #sp{#cons{x, xs}, #cons{y, ys}}
+}
+
+// Merge Sort
+// ----------
+
+// Merges two sorted lists.
+@merge = λ{
+  #nil: λ&ys.
+    ys;
+  #cons: λ&x. λ&xt. λ&ys.
+    @merge_l(x, xt, ys)
+}
+
+// Merges a non-empty left list against right list.
+@merge_l = λ&x. λ&xt. λ{
+  #nil:
+    #cons{x, xt};
+  #cons: λ&y. λ&yt.
+    ! le = @u2b(x <= y);
+    @merge_pick(le, x, xt, y, yt)
+}
+
+// Picks the next head when merging sorted lists.
+@merge_pick = λ{
+  #T: λ&x. λ&xt. λ&y. λ&yt.
+    #cons{x, @merge(xt, #cons{y, yt})};
+  #F: λ&x. λ&xt. λ&y. λ&yt.
+    #cons{y, @merge(#cons{x, xt}, yt)}
+}
+
+// Sorts a list with merge sort.
+@sort = λ{
+  #nil:
+    #nil{};
+  #cons: λ&x. λ{
+    #nil:
+      #cons{x, #nil{}};
+    #cons: λ&y. λ&ys.
+      ! p = @split(#cons{x, #cons{y, ys}});
+      @sort_split(p)
+  }
+}
+
+// Sorts each split side and merges the results.
+@sort_split = λ{
+  #sp: λ&xs. λ&ys.
+    ! l = @sort(xs);
+    ! r = @sort(ys);
+    @merge(l, r)
+}
+
+// Hash
+// ----
+
+// Folds a list into a U32 checksum.
+@hash = λ{
+  #nil: λ&acc.
+    acc;
+  #cons: λ&x. λ&xt. λ&acc.
+    ! acc = (acc ^ x) * 16777619 + 2166136261;
+    @hash(xt, acc)
+}
+
+// Bench
+// -----
+
+// Runs one build + sort + hash step.
+@step = λ&sed. λ&acc.
+  ! xs  = @gen(2048, sed);
+  ! ys  = @sort(xs);
+  ! acc = @hash(ys, acc ^ sed);
+  ! sed = @rng(sed);
+  #st{sed, acc}
+
+// Runs one step from a benchmark state.
+@step_st = λ{
+  #st: λ&sed. λ&acc.
+    @step(sed, acc)
+}
+
+// Runs repeated list-build + merge-sort + hash rounds.
+@bench = λ&rnd. λ&sed. λ&acc.
+  ! done = @u2b(rnd == 0);
+  @bench_go(done, rnd, sed, acc)
+
+// Runs one benchmark round, then recurs.
+@bench_go = λ{
+  #T: λ&rnd. λ&sed. λ&acc.
+    acc;
+  #F: λ&rnd. λ&sed. λ&acc.
+    ! s   = @step(sed, acc);
+    ! s   = @step_st(s);
+    ! s   = @step_st(s);
+    ! s   = @step_st(s);
+    ! rnd = rnd - 1;
+    @bench_take(rnd, s)
+}
+
+// Continues benchmark from a computed state.
+@bench_take = λ&rnd. λ{
+  #st: λ&sed. λ&acc.
+    @bench(rnd, sed, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @bench(5, 1, 0)

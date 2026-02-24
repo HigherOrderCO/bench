@@ -1,0 +1,77 @@
+// ray_sphere/main.hvm
+// ===================
+// Casts rays through a pixel grid against a fixed sphere scene.
+// Manual port of bench/ray_sphere/main.bend.
+
+// Utils
+// -----
+
+// Returns absolute difference between `a` and `b`.
+@abs_diff = λ&a. λ&b.
+  ! &ge = a >= b;
+  ge * (a - b) + (1 - ge) * (b - a)
+
+// Scene
+// -----
+
+// Builds the fixed benchmark scene with 5 spheres.
+@build_scene =
+  #scons{#sphere{128, 128, 80},
+  #scons{#sphere{300, 200, 60},
+  #scons{#sphere{200, 350, 70},
+  #scons{#sphere{400, 100, 50},
+  #scons{#sphere{350, 400, 90},
+  #snil{}}}}}}
+
+// Shade
+// -----
+
+// Computes shade contribution of one sphere at pixel `(x, y)`.
+@sphere_shade = λ&x. λ&y. λ{
+  #sphere: λ&cx. λ&cy. λ&r.
+    ! &dx = @abs_diff(x, cx);
+    ! &dy = @abs_diff(y, cy);
+    ! &d2 = dx * dx + dy * dy;
+    ! &r2 = r * r;
+    ! hit = d2 <= r2;
+    hit * (r2 - d2)
+}
+
+// Sums shade contributions from all spheres for one pixel.
+@pixel_shade = λ&x. λ&y. λ{
+  #snil: λ&acc.
+    acc;
+  #scons: λ&s. λ&rst. λ&acc.
+    ! val = @sphere_shade(x, y, s);
+    @pixel_shade(x, y, rst, acc + val)
+}
+
+// Image
+// -----
+
+// Iterates one image row (y from `y` down to 1).
+@row = λ&x. λ{
+  0: λ&scn. λ&acc.
+    acc;
+  λ&y. λ&scn. λ&acc.
+    ! val = @pixel_shade(x, y, scn, 0);
+    ! acc = (acc ^ val) * 16777619 + 2166136261;
+    @row(x, y - 1, scn, acc)
+}
+
+// Iterates image columns (x from `x` down to 1).
+@image = λ{
+  0: λ&h. λ&scn. λ&acc.
+    acc;
+  λ&x. λ&h. λ&scn. λ&acc.
+    ! acc = @row(x, h, scn, acc);
+    @image(x - 1, h, scn, acc)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main =
+  ! scn = @build_scene;
+  @image(580, 580, scn, 0)

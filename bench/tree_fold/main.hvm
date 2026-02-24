@@ -1,0 +1,36 @@
+// tree_fold/main.hvm
+// ==================
+// Builds a complete binary tree with pseudo-random leaf seeds, then folds it.
+// Manual port of bench/tree_fold/main.bend.
+
+// Build
+// -----
+
+// Builds a full binary tree of depth `dep`, assigning `sed` at leaves.
+@build = λ{
+  0n: λ&sed.
+    #leaf{sed};
+  1n+: λ&dep. λ&sed.
+    ! lft = @build(dep, sed * 1664525 + 1013904223);
+    ! rgt = @build(dep, sed * 214013 + 2531011);
+    #node{lft, rgt}
+}
+
+// Fold
+// ----
+
+// Folds the tree with the benchmark's mixing function.
+@fold = λ{
+  #leaf: λ&val.
+    val;
+  #node: λ&lft. λ&rgt.
+    ! &a = @fold(lft);
+    ! b  = @fold(rgt);
+    (a + b) ^ (a * 31)
+}
+
+// Main
+// ----
+
+// Evaluates the benchmark with the shared tuned input.
+@main = @fold(@build(21n, 42))
