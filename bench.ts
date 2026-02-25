@@ -9,7 +9,7 @@
 //
 // Sampling model:
 // - warmup calls
-// - timed calls until both min_runs and min_secs are satisfied
+// - timed calls until either min_runs or min_secs is satisfied
 // - report mean seconds per call
 
 import { spawn } from "node:child_process";
@@ -27,7 +27,7 @@ var MAX_BUFFER     = 64 * 1024 * 1024;
 var CMD_TIMEOUT_MS = 20 * 60 * 1000;
 var CLEAR          = "\x1b[2J\x1b[H";
 
-var DEF_WARMUP   = 1;
+var DEF_WARMUP   = 0;
 var DEF_MIN_RUNS = 3;
 var DEF_MAX_RUNS = 40;
 var DEF_MIN_SECS = 1.0;
@@ -94,6 +94,12 @@ type Mode = {
   needs_node:    boolean;
   needs_node_ts: boolean;
   run:           (row: Row, cfg: SampleCfg) => Promise<number>;
+};
+
+type CliCfg = {
+  show_help:   boolean;
+  timeout_ms:  number;
+  mode_tokens: string[];
 };
 
 // Cells
@@ -191,6 +197,25 @@ function env_pos_int(name: string, fallback: number): number {
   return val;
 }
 
+// Reads a non-negative integer env var.
+function env_nonneg_int(name: string, fallback: number): number {
+  var raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+
+  var val = Number(raw);
+  if (!Number.isFinite(val)) {
+    throw new Error("invalid env " + name + ": " + JSON.stringify(raw));
+  }
+
+  var val = Math.floor(val);
+  if (val < 0) {
+    throw new Error("invalid env " + name + " (must be >= 0): " + JSON.stringify(raw));
+  }
+  return val;
+}
+
 // Reads a non-negative number env var.
 function env_nonneg_num(name: string, fallback: number): number {
   var raw = process.env[name];
@@ -208,7 +233,7 @@ function env_nonneg_num(name: string, fallback: number): number {
 // Returns benchmark sampling config.
 function sample_cfg_get(): SampleCfg {
   var cfg: SampleCfg = {
-    warmup:   env_pos_int("BENCH_WARMUP",   DEF_WARMUP),
+    warmup:   env_nonneg_int("BENCH_WARMUP", DEF_WARMUP),
     min_runs: env_pos_int("BENCH_MIN_RUNS", DEF_MIN_RUNS),
     max_runs: env_pos_int("BENCH_MAX_RUNS", DEF_MAX_RUNS),
     min_secs: env_nonneg_num("BENCH_MIN_SECS", DEF_MIN_SECS),
@@ -435,6 +460,23 @@ async function run_cmd(cmd: string, args: string[], cwd: string = ROOT_DIR): Pro
 // Sampling
 // --------
 
+// Returns whether sampling needs one more timed run.
+function sample_needs_more(cnt: number, sum: number, cfg: SampleCfg): boolean {
+  if (cnt === 0) {
+    return true;
+  }
+
+  if (cnt >= cfg.max_runs) {
+    return false;
+  }
+
+  if (cnt < cfg.min_runs && sum < cfg.min_secs) {
+    return true;
+  }
+
+  return false;
+}
+
 // Runs one async callback with warmup and sampled averaging.
 async function run_sampled(run_once: () => Promise<void>, cfg: SampleCfg): Promise<number> {
   for (var i = 0; i < cfg.warmup; ++i) {
@@ -443,17 +485,13 @@ async function run_sampled(run_once: () => Promise<void>, cfg: SampleCfg): Promi
 
   var sum = 0;
   var cnt = 0;
-  while (cnt < cfg.min_runs || sum < cfg.min_secs) {
+  while (sample_needs_more(cnt, sum, cfg)) {
     var start = now_ns();
     await run_once();
     var secs = elapsed_secs(start);
 
     sum += secs;
     cnt += 1;
-
-    if (cnt >= cfg.max_runs) {
-      break;
-    }
   }
 
   if (cnt === 0) {
@@ -470,17 +508,13 @@ function run_hot_sync(run: () => unknown, cfg: SampleCfg): number {
 
   var sum = 0;
   var cnt = 0;
-  while (cnt < cfg.min_runs || sum < cfg.min_secs) {
+  while (sample_needs_more(cnt, sum, cfg)) {
     var start = now_ns();
     run();
     var secs = elapsed_secs(start);
 
     sum += secs;
     cnt += 1;
-
-    if (cnt >= cfg.max_runs) {
-      break;
-    }
   }
 
   if (cnt === 0) {
@@ -594,12 +628,33 @@ function js_node_runner_src(): string {
     "  return val;",
     "}",
     "",
-    "function parse_int(txt, nam) {",
+    "function parse_nonneg_int(txt, nam) {",
+    "  var val = Math.floor(parse_num(txt, nam));",
+    "  if (val < 0) {",
+    "    throw new Error(\"invalid non-negative int arg: \" + nam + \"=\" + JSON.stringify(txt));",
+    "  }",
+    "  return val;",
+    "}",
+    "",
+    "function parse_pos_int(txt, nam) {",
     "  var val = Math.floor(parse_num(txt, nam));",
     "  if (val <= 0) {",
     "    throw new Error(\"invalid positive int arg: \" + nam + \"=\" + JSON.stringify(txt));",
     "  }",
     "  return val;",
+    "}",
+    "",
+    "function sample_needs_more(cnt, sum, min_runs, max_runs, min_secs) {",
+    "  if (cnt === 0) {",
+    "    return true;",
+    "  }",
+    "  if (cnt >= max_runs) {",
+    "    return false;",
+    "  }",
+    "  if (cnt < min_runs && sum < min_secs) {",
+    "    return true;",
+    "  }",
+    "  return false;",
     "}",
     "",
     "function js_main_get(mod) {",
@@ -621,9 +676,9 @@ function js_node_runner_src(): string {
     "  }",
     "",
     "  var mod_fil  = args[0];",
-    "  var warmup   = parse_int(args[1], \"warmup\");",
-    "  var min_runs = parse_int(args[2], \"min_runs\");",
-    "  var max_runs = parse_int(args[3], \"max_runs\");",
+    "  var warmup   = parse_nonneg_int(args[1], \"warmup\");",
+    "  var min_runs = parse_pos_int(args[2], \"min_runs\");",
+    "  var max_runs = parse_pos_int(args[3], \"max_runs\");",
     "  var min_secs = parse_num(args[4], \"min_secs\");",
     "",
     "  var mod = await import(url.pathToFileURL(mod_fil).href + \"?v=\" + String(now_ns()));",
@@ -635,15 +690,12 @@ function js_node_runner_src(): string {
     "",
     "  var sum = 0;",
     "  var cnt = 0;",
-    "  while (cnt < min_runs || sum < min_secs) {",
+    "  while (sample_needs_more(cnt, sum, min_runs, max_runs, min_secs)) {",
     "    var start = now_ns();",
     "    run();",
     "    var secs = elapsed_secs(start);",
     "    sum += secs;",
     "    cnt += 1;",
-    "    if (cnt >= max_runs) {",
-    "      break;",
-    "    }",
     "  }",
     "",
     "  if (cnt === 0) {",
@@ -1298,6 +1350,58 @@ function mode_parse(arg: string): Mode | null {
   return null;
 }
 
+// Parses one positive timeout argument in seconds.
+function timeout_parse_ms(txt: string): number {
+  var secs = Number(txt);
+  if (!Number.isFinite(secs) || secs <= 0) {
+    throw new Error("invalid --timeout value (seconds > 0): " + JSON.stringify(txt));
+  }
+
+  var ms = Math.floor(secs * 1000);
+  if (ms <= 0) {
+    throw new Error("invalid --timeout value (too small): " + JSON.stringify(txt));
+  }
+  return ms;
+}
+
+// Parses CLI options and returns remaining mode tokens.
+function parse_cli(args: string[]): CliCfg {
+  var cfg: CliCfg = {
+    show_help:   false,
+    timeout_ms:  CMD_TIMEOUT_MS,
+    mode_tokens: [],
+  };
+
+  for (var i = 0; i < args.length; ++i) {
+    var arg = args[i];
+
+    if (arg === "-h" || arg === "--help") {
+      cfg.show_help = true;
+      continue;
+    }
+
+    if (arg === "--timeout") {
+      if (i + 1 >= args.length) {
+        throw new Error("missing value for --timeout");
+      }
+      var val = args[i + 1];
+      cfg.timeout_ms = timeout_parse_ms(val);
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--timeout=")) {
+      var val = arg.slice("--timeout=".length);
+      cfg.timeout_ms = timeout_parse_ms(val);
+      continue;
+    }
+
+    cfg.mode_tokens.push(arg);
+  }
+
+  return cfg;
+}
+
 // Prints usage.
 function usage(): void {
   var flags = MODE_DEFS.map(def => {
@@ -1316,7 +1420,10 @@ function usage(): void {
   });
 
   process.stdout.write([
-    "usage: bench.ts <mode> [mode ...]",
+    "usage: bench.ts [--timeout SECS] <mode> [mode ...]",
+    "",
+    "options:",
+    "  --timeout SECS  max seconds per spawned command (default: 1200)",
     "",
     "modes:",
     ...lines,
@@ -1365,18 +1472,27 @@ function parse_modes(args: string[]): Mode[] {
 // Runs benchmark CLI.
 async function main(): Promise<number> {
   var args = process.argv.slice(2);
-  if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
+  if (args.length === 0) {
     usage();
-    return args.length === 0 ? 1 : 0;
+    return 1;
   }
 
-  var modes = parse_modes(args);
+  var cli = parse_cli(args);
+  if (cli.show_help) {
+    usage();
+    return 0;
+  }
+
+  CMD_TIMEOUT_MS = cli.timeout_ms;
+
+  var modes = parse_modes(cli.mode_tokens);
   if (modes.length === 0) {
     usage();
     return 1;
   }
 
   var cfg = sample_cfg_get();
+  process.stdout.write("timeout: " + (CMD_TIMEOUT_MS / 1000).toFixed(3) + "s\n");
   process.stdout.write(sample_cfg_show(cfg) + "\n");
 
   ensure_mode_deps(modes);
