@@ -30,3 +30,41 @@ Benchmarks
 - `spin_tree` — Binary tree to depth 8 with spin loops at 256 leaves (HVM)
 - `tree_fold` — Builds and folds a binary tree to depth 24 (Bend)
 - `u32_fib` — Naive Fibonacci on U32 to n=44 (Bend)
+
+Runner
+------
+
+Run benchmarks with the unified script:
+
+```sh
+./bench.ts --hvm-interpreted
+./bench.ts --hvm-compiled
+./bench.ts --bend-via-bunjs --bend-via-nodejs
+./bench.ts --bend-interpreted-via-bunjs --bend-interpreted-via-hvm-compiled
+```
+
+Available options:
+
+- `--bend-via-bunjs` (`bend-bun`)
+- `--bend-via-nodejs` (`bend-node`)
+- `--bend-via-hvm-interpreted[-TN]` (`bend-hvmi[N]`)
+- `--bend-via-hvm-compiled[-TN]` (`bend-hvmc[N]`)
+- `--bend-interpreted-via-bunjs` (`bendi-bun`)
+- `--bend-interpreted-via-nodejs` (`bendi-node`)
+- `--bend-interpreted-via-hvm-interpreted[-TN]` (`bendi-hvmi[N]`)
+- `--bend-interpreted-via-hvm-compiled[-TN]` (`bendi-hvmc[N]`)
+- `--hvm-interpreted[-TN]` (`hvmi[N]`)
+- `--hvm-compiled[-TN]` (`hvmc[N]`)
+
+Examples:
+
+- `./bench.ts hvmi hvmi4 hvmc8 bend-bun`
+- `./bench.ts --hvm-interpreted-T4 --bend-via-hvm-compiled-T8`
+
+Command overrides:
+
+- `BEND_CMD` (default: `bend`)
+- `HVM_CMD` (default: `hvm`)
+- `BUN_CMD` (default: `bun`)
+- `NODE_CMD` (default: `node`)
+- `BEND_NODE_ENTRY` (optional explicit script path for `bendi-node`)
