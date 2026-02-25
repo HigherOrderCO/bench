@@ -32,7 +32,8 @@ var DEF_MIN_RUNS = 3;
 var DEF_MAX_RUNS = 40;
 var DEF_MIN_SECS = 1.0;
 
-var SECS_TAG = "BENCH_SECS";
+var SECS_TAG       = "BENCH_SECS";
+var TIMEOUT_PREFIX = "timed out after ";
 
 var ROOT_DIR = path.dirname(url.fileURLToPath(import.meta.url));
 var CASE_DIR = path.join(ROOT_DIR, "bench");
@@ -46,7 +47,7 @@ var NODE_CMD = process.env.NODE_CMD ?? "node";
 // Types
 // -----
 
-type CellState = "pending" | "running" | "done" | "error" | "na";
+type CellState = "pending" | "running" | "done" | "error" | "timeout" | "na";
 
 type Cell = {
   state: CellState;
@@ -346,6 +347,11 @@ function spawn_err_msg(cmd: string, err: unknown): string {
   return String(err);
 }
 
+// Returns whether one error message corresponds to a timeout.
+function err_is_timeout(msg: string): boolean {
+  return msg.startsWith(TIMEOUT_PREFIX);
+}
+
 // Runs one command and returns stdout, or throws on failure.
 async function run_cmd(cmd: string, args: string[], cwd: string = ROOT_DIR): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -452,7 +458,7 @@ async function run_cmd(cmd: string, args: string[], cwd: string = ROOT_DIR): Pro
           child.kill("SIGKILL");
         } catch {}
       }
-      fin_err("timed out after " + CMD_TIMEOUT_MS + "ms: " + cmd_txt);
+      fin_err(TIMEOUT_PREFIX + CMD_TIMEOUT_MS + "ms: " + cmd_txt);
     }, CMD_TIMEOUT_MS);
   });
 }
@@ -1140,6 +1146,9 @@ function fmt_cell(cell: Cell, wid: number): string {
     case "error": {
       return pad_left("ERROR", wid);
     }
+    case "timeout": {
+      return pad_left("TIMEOUT", wid);
+    }
     case "na": {
       return pad_left("N/A", wid);
     }
@@ -1267,7 +1276,7 @@ async function bench_all(modes: Mode[], cfg: SampleCfg): Promise<number> {
         cell.secs  = secs;
       } catch (err) {
         var msg = err instanceof Error ? err.message : String(err);
-        cell.state = "error";
+        cell.state = err_is_timeout(msg) ? "timeout" : "error";
         cell.err   = msg;
         had_error = true;
       }
