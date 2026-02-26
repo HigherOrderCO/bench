@@ -79,4 +79,4 @@ def bench(rounds: U32, n: U32, acc: U32) -> U32:
 
 # Entry point
 def main() -> U32:
-  bench(19, 11, 0)
+  bench(256, 11, 0)

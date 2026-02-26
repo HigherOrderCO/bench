@@ -11,7 +11,16 @@ def u32_fib(n: U32) -> U32:
     case k:
       u32_fib(k - 1) + u32_fib(k - 2)
 
+# Runs repeated Fibonacci evaluations and mixes results.
+def bench(rounds: U32, acc: U32) -> U32:
+  match rounds:
+    case 0:
+      acc
+    case r:
+      a = u32_fib(38)
+      b = u32_fib(35)
+      acc = (acc ^ a) + b * 97 + r
+      bench(r - 1, acc)
+
 def main() -> U32:
-  a = u32_fib(38)
-  b = u32_fib(35)
-  a + b
+  bench(240000, 0)

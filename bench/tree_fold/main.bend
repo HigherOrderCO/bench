@@ -32,6 +32,6 @@ def fold(t: Tree) -> U32:
       (a + b) ^ (a * 31)
 
 def main() -> U32:
-  a = fold(build(22n, 42))
-  b = fold(build(20n, 43))
+  a = fold(build(24n, 42))
+  b = fold(build(21n, 43))
   a ^ b
