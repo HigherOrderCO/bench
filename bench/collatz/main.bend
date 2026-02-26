@@ -25,4 +25,4 @@ def total(n: U32, acc: U32) -> U32:
       total(k - 1, acc + steps(k, 0))
 
 def main() -> U32:
-  total(500000, 0)
+  total(2160000, 0)

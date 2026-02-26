@@ -88,4 +88,4 @@ def image(x: U32, h: U32, scene: Scene, acc: U32) -> U32:
 # Entry point
 def main() -> U32:
   scene = build_scene()
-  image(580, 580, scene, 0)
+  image(3780, 3780, scene, 0)

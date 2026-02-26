@@ -88,4 +88,4 @@ def drain_q(q: Queue, acc: U32) -> U32:
 
 # Entry point
 def main() -> U32:
-  bench(400, 512, 1, 0)
+  bench(4096, 6144, 1, 0)

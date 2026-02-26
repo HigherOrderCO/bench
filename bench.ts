@@ -27,10 +27,10 @@ var MAX_BUFFER     = 64 * 1024 * 1024;
 var CMD_TIMEOUT_MS = 20 * 60 * 1000;
 var CLEAR          = "\x1b[2J\x1b[H";
 
-var DEF_WARMUP   = 0;
-var DEF_MIN_RUNS = 3;
-var DEF_MAX_RUNS = 40;
-var DEF_MIN_SECS = 1.0;
+var DEF_WARMUP   = 1;
+var DEF_MIN_RUNS = 1;
+var DEF_MAX_RUNS = 1;
+var DEF_MIN_SECS = 0.0;
 
 var SECS_TAG       = "BENCH_SECS";
 var TIMEOUT_PREFIX = "timed out after ";
@@ -239,18 +239,12 @@ function env_nonneg_num(name: string, fallback: number): number {
 
 // Returns benchmark sampling config.
 function sample_cfg_get(): SampleCfg {
-  var cfg: SampleCfg = {
-    warmup:   env_nonneg_int("BENCH_WARMUP", DEF_WARMUP),
-    min_runs: env_pos_int("BENCH_MIN_RUNS", DEF_MIN_RUNS),
-    max_runs: env_pos_int("BENCH_MAX_RUNS", DEF_MAX_RUNS),
-    min_secs: env_nonneg_num("BENCH_MIN_SECS", DEF_MIN_SECS),
+  return {
+    warmup:   DEF_WARMUP,
+    min_runs: DEF_MIN_RUNS,
+    max_runs: DEF_MAX_RUNS,
+    min_secs: DEF_MIN_SECS,
   };
-
-  if (cfg.max_runs < cfg.min_runs) {
-    throw new Error("BENCH_MAX_RUNS must be >= BENCH_MIN_RUNS");
-  }
-
-  return cfg;
 }
 
 // Formats sampling config.

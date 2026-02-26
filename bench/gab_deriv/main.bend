@@ -82,5 +82,14 @@ def loop(n: Nat, acc: U32) -> U32:
     case 1n+p acc:
       loop(p, acc + size(deriv(test_expr())))
 
+# Runs repeated derivation batches and accumulates checksums.
+def bench(rounds: U32, acc: U32) -> U32:
+  match rounds:
+    case 0:
+      acc
+    case r:
+      acc = acc + loop(1000n, 0)
+      bench(r - 1, acc)
+
 def main() -> U32:
-  loop(400000n, 0)
+  bench(1560, 0)

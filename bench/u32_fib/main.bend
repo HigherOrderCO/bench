@@ -12,4 +12,6 @@ def u32_fib(n: U32) -> U32:
       u32_fib(k - 1) + u32_fib(k - 2)
 
 def main() -> U32:
-  u32_fib(38)
+  a = u32_fib(38)
+  b = u32_fib(35)
+  a + b

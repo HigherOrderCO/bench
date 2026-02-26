@@ -82,5 +82,17 @@ def len(l: Lst) -> U32:
     case cons{h, t}:
       len(t) + 1
 
+# Runs repeated TAKL evaluations and accumulates lengths.
+def bench(rounds: U32, acc: U32) -> U32:
+  match rounds:
+    case 0:
+      acc
+    case r:
+      x   = listn(360n)
+      y   = listn(354n)
+      z   = listn(348n)
+      val = len(mas(x, y, z))
+      bench(r - 1, acc + val)
+
 def main() -> U32:
-  len(mas(listn(270n), listn(264n), listn(258n)))
+  bench(8, 0)
