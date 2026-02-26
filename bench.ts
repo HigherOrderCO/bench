@@ -39,10 +39,13 @@ var ROOT_DIR = path.dirname(url.fileURLToPath(import.meta.url));
 var CASE_DIR = path.join(ROOT_DIR, "bench");
 var TMP_DIR  = fs.mkdtempSync(path.join(os.tmpdir(), "bench-ts."));
 
-var BEND_CMD = process.env.BEND_CMD ?? "bend";
-var HVM_CMD  = process.env.HVM_CMD  ?? "hvm";
-var BUN_CMD  = process.env.BUN_CMD  ?? "bun";
-var NODE_CMD = process.env.NODE_CMD ?? "node";
+var BEND_CMD           = process.env.BEND_CMD           ?? "bend";
+var NEW_BEND_CMD       = process.env.NEW_BEND_CMD       ?? "newbend";
+var BEND_NODE_ENTRY    = process.env.BEND_NODE_ENTRY    ?? null;
+var NEW_BEND_NODE_ENTRY = process.env.NEW_BEND_NODE_ENTRY ?? null;
+var HVM_CMD            = process.env.HVM_CMD            ?? "hvm";
+var BUN_CMD            = process.env.BUN_CMD            ?? "bun";
+var NODE_CMD           = process.env.NODE_CMD           ?? "node";
 
 // Types
 // -----
@@ -70,18 +73,20 @@ type SampleCfg = {
 };
 
 type ModeInput = "bend" | "hvm";
+type BendCmdSrc = "none" | "bend" | "newbend";
 
 type ModeDef = {
   flag:          string;
   label:         string;
   input:         ModeInput;
+  bend_cmd_src:  BendCmdSrc;
   needs_bend:    boolean;
   needs_hvm:     boolean;
   needs_bun:     boolean;
   needs_node:    boolean;
   needs_node_ts: boolean;
   hvm_threads:   boolean;
-  run:           (row: Row, cfg: SampleCfg, threads: number) => Promise<number>;
+  run:           (row: Row, cfg: SampleCfg, threads: number, bend_cmd: string | null) => Promise<number>;
 };
 
 type Mode = {
@@ -89,6 +94,7 @@ type Mode = {
   flag:          string;
   label:         string;
   input:         ModeInput;
+  bend_cmd:      string | null;
   needs_bend:    boolean;
   needs_hvm:     boolean;
   needs_bun:     boolean;
@@ -825,33 +831,47 @@ async function hvm_compile_bin(file: string, name: string, flow: string, threads
 // Bend Helpers
 // ------------
 
-var BEND_ENTRY: string | null = null;
-var BEND_NODE_BUNDLE: string | null = null;
+var BEND_ENTRY_CACHE = new Map<string, string>();
+var BEND_NODE_BUNDLE_CACHE = new Map<string, string>();
 
-// Resolves script path behind `bend` for node strip-types mode.
-function bend_entry_get(): string {
-  if (BEND_ENTRY !== null) {
-    return BEND_ENTRY;
+// Returns node-entry override for one Bend command, if configured.
+function bend_node_entry_override_get(bend_cmd: string): string | null {
+  if (bend_cmd === BEND_CMD) {
+    return BEND_NODE_ENTRY;
+  }
+  if (bend_cmd === NEW_BEND_CMD) {
+    return NEW_BEND_NODE_ENTRY;
+  }
+  return null;
+}
+
+// Resolves script path behind one Bend command for node strip-types mode.
+function bend_entry_get(bend_cmd: string): string {
+  var old = BEND_ENTRY_CACHE.get(bend_cmd);
+  if (old !== undefined) {
+    return old;
   }
 
-  var exe = resolve_cmd_path(BEND_CMD);
+  var exe = resolve_cmd_path(bend_cmd);
   var ext = path.extname(exe).toLowerCase();
   if (ext !== ".ts" && ext !== ".js" && ext !== ".mjs" && ext !== ".cjs") {
-    throw new Error("could not derive script entry from bend command: " + exe + " (set BEND_NODE_ENTRY)");
+    throw new Error("could not derive script entry from bend command: " + exe + " (set *_BEND_NODE_ENTRY)");
   }
 
-  BEND_ENTRY = process.env.BEND_NODE_ENTRY ?? exe;
-  return BEND_ENTRY;
+  var entry = bend_node_entry_override_get(bend_cmd) ?? exe;
+  BEND_ENTRY_CACHE.set(bend_cmd, entry);
+  return entry;
 }
 
 // Builds (or returns) a Node-runnable bundled Bend CLI entry.
-async function bend_node_bundle_get(): Promise<string> {
-  if (BEND_NODE_BUNDLE !== null) {
-    return BEND_NODE_BUNDLE;
+async function bend_node_bundle_get(bend_cmd: string): Promise<string> {
+  var old = BEND_NODE_BUNDLE_CACHE.get(bend_cmd);
+  if (old !== undefined) {
+    return old;
   }
 
-  var entry = bend_entry_get();
-  var out   = tmp_path(["bend", "node", "bundle"], ".mjs");
+  var entry = bend_entry_get(bend_cmd);
+  var out   = tmp_path(["bend", "node", "bundle", bend_cmd], ".mjs");
   await run_cmd(BUN_CMD, [
     "build",
     entry,
@@ -861,20 +881,24 @@ async function bend_node_bundle_get(): Promise<string> {
     out,
   ], ROOT_DIR);
 
-  BEND_NODE_BUNDLE = out;
-  return BEND_NODE_BUNDLE;
+  BEND_NODE_BUNDLE_CACHE.set(bend_cmd, out);
+  return out;
 }
 
 // Compiles one `.bend` file to `.hvm` through Bend CLI and caches output.
-async function bend_compile_hvm(file: string, cli_flag: "--to-hvm" | "--to-chk"): Promise<string> {
-  var key = cli_flag + "|" + file;
+async function bend_compile_hvm(
+  file: string,
+  cli_flag: "--to-hvm" | "--to-chk",
+  bend_cmd: string = BEND_CMD,
+): Promise<string> {
+  var key = bend_cmd + "|" + cli_flag + "|" + file;
   var old = BEND_HVM_CACHE.get(key);
   if (old !== undefined) {
     return old;
   }
 
-  var out = await run_cmd(BEND_CMD, [file, cli_flag], ROOT_DIR);
-  var fil = tmp_path(["bend", cli_flag, bench_tag(file)], ".hvm");
+  var out = await run_cmd(bend_cmd, [file, cli_flag], ROOT_DIR);
+  var fil = tmp_path(["bend", cli_flag, bend_cmd, bench_tag(file)], ".hvm");
   fs.writeFileSync(fil, out, "utf8");
 
   BEND_HVM_CACHE.set(key, fil);
@@ -882,30 +906,31 @@ async function bend_compile_hvm(file: string, cli_flag: "--to-hvm" | "--to-chk")
 }
 
 // Compiles one `.bend` file to JS library (main exported, no auto-run).
-async function bend_compile_js_lib(file: string): Promise<string> {
-  var old = BEND_JS_CACHE.get(file);
+async function bend_compile_js_lib(file: string, bend_cmd: string = BEND_CMD): Promise<string> {
+  var key = bend_cmd + "|" + file;
+  var old = BEND_JS_CACHE.get(key);
   if (old !== undefined) {
     return old;
   }
 
-  var js  = await run_cmd(BEND_CMD, [file, "--to-js"], ROOT_DIR);
+  var js  = await run_cmd(bend_cmd, [file, "--to-js"], ROOT_DIR);
   var js  = bend_js_strip_run_main(js);
-  var out = tmp_path(["bend", "js", bench_tag(file)], ".mjs");
+  var out = tmp_path(["bend", "js", bend_cmd, bench_tag(file)], ".mjs");
   fs.writeFileSync(out, js, "utf8");
 
-  BEND_JS_CACHE.set(file, out);
+  BEND_JS_CACHE.set(key, out);
   return out;
 }
 
 // Runs one Bend benchmark once via Bun runtime.
-async function bend_run_once_bun(file: string): Promise<void> {
-  var entry = bend_entry_get();
+async function bend_run_once_bun(file: string, bend_cmd: string = BEND_CMD): Promise<void> {
+  var entry = bend_entry_get(bend_cmd);
   await run_cmd(BUN_CMD, ["run", entry, file], ROOT_DIR);
 }
 
 // Runs one Bend benchmark once via Node strip-types runtime.
-async function bend_run_once_node(file: string): Promise<void> {
-  var bundle = await bend_node_bundle_get();
+async function bend_run_once_node(file: string, bend_cmd: string = BEND_CMD): Promise<void> {
+  var bundle = await bend_node_bundle_get(bend_cmd);
   await run_cmd(NODE_CMD, [bundle, file], ROOT_DIR);
 }
 
@@ -913,26 +938,32 @@ async function bend_run_once_node(file: string): Promise<void> {
 // -----
 
 // Runs native Bend via Bun (compile once, hot-call main in-process).
-async function mode_bend_bun(row: Row, cfg: SampleCfg, _threads: number): Promise<number> {
+async function mode_bend_bun(row: Row, cfg: SampleCfg, _threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var mod_file = await bend_compile_js_lib(file);
+  var mod_file = await bend_compile_js_lib(file, bend_cmd);
   var mod      = await import(js_mod_url(mod_file));
   var run      = js_main_get(mod as Record<string, unknown>);
   return run_hot_sync(run, cfg);
 }
 
 // Runs native Bend via Node (compile once, hot-call main in one helper).
-async function mode_bend_node(row: Row, cfg: SampleCfg, _threads: number): Promise<number> {
+async function mode_bend_node(row: Row, cfg: SampleCfg, _threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var mod_file = await bend_compile_js_lib(file);
+  var mod_file = await bend_compile_js_lib(file, bend_cmd);
   var runner   = js_node_runner_path();
 
   var out = await run_cmd(NODE_CMD, [
@@ -947,73 +978,91 @@ async function mode_bend_node(row: Row, cfg: SampleCfg, _threads: number): Promi
 }
 
 // Runs native Bend via HVM interpreted.
-async function mode_bend_hvmi(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_bend_hvmi(row: Row, cfg: SampleCfg, threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var hvm_file = await bend_compile_hvm(file, "--to-hvm");
+  var hvm_file = await bend_compile_hvm(file, "--to-hvm", bend_cmd);
   return await run_sampled(() => hvm_run_file_once(hvm_file, row.name, threads), cfg);
 }
 
 // Runs native Bend via HVM compiled (compile time excluded).
-async function mode_bend_hvmc(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_bend_hvmc(row: Row, cfg: SampleCfg, threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var hvm_file = await bend_compile_hvm(file, "--to-hvm");
+  var hvm_file = await bend_compile_hvm(file, "--to-hvm", bend_cmd);
   var bin_file = await hvm_compile_bin(hvm_file, row.name, "bend-hvmc", threads);
   return await run_sampled(() => hvm_run_bin_once(bin_file), cfg);
 }
 
 // Runs interpreted Bend via Bun.
-async function mode_bendi_bun(row: Row, cfg: SampleCfg, _threads: number): Promise<number> {
+async function mode_bendi_bun(row: Row, cfg: SampleCfg, _threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  return await run_sampled(() => bend_run_once_bun(file), cfg);
+  return await run_sampled(() => bend_run_once_bun(file, bend_cmd), cfg);
 }
 
 // Runs interpreted Bend via Node.
-async function mode_bendi_node(row: Row, cfg: SampleCfg, _threads: number): Promise<number> {
+async function mode_bendi_node(row: Row, cfg: SampleCfg, _threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  return await run_sampled(() => bend_run_once_node(file), cfg);
+  return await run_sampled(() => bend_run_once_node(file, bend_cmd), cfg);
 }
 
 // Runs interpreted Bend via HVM interpreted.
-async function mode_bendi_hvmi(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_bendi_hvmi(row: Row, cfg: SampleCfg, threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var hvm_file = await bend_compile_hvm(file, "--to-chk");
+  var hvm_file = await bend_compile_hvm(file, "--to-chk", bend_cmd);
   return await run_sampled(() => hvm_run_file_once(hvm_file, row.name, threads), cfg);
 }
 
 // Runs interpreted Bend via HVM compiled (compile time excluded).
-async function mode_bendi_hvmc(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_bendi_hvmc(row: Row, cfg: SampleCfg, threads: number, bend_cmd: string | null): Promise<number> {
   var file = row.bend_file;
   if (file === null) {
     throw new Error("internal: missing bend file");
   }
+  if (bend_cmd === null) {
+    throw new Error("internal: missing bend command");
+  }
 
-  var hvm_file = await bend_compile_hvm(file, "--to-chk");
+  var hvm_file = await bend_compile_hvm(file, "--to-chk", bend_cmd);
   var bin_file = await hvm_compile_bin(hvm_file, row.name, "bendi-hvmc", threads);
   return await run_sampled(() => hvm_run_bin_once(bin_file), cfg);
 }
 
 // Runs HVM benchmark via interpreted mode.
-async function mode_hvmi(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_hvmi(row: Row, cfg: SampleCfg, threads: number, _bend_cmd: string | null): Promise<number> {
   var file = row.hvm_file;
   if (file === null) {
     throw new Error("internal: missing hvm file");
@@ -1023,7 +1072,7 @@ async function mode_hvmi(row: Row, cfg: SampleCfg, threads: number): Promise<num
 }
 
 // Runs HVM benchmark via compiled mode (compile time excluded).
-async function mode_hvmc(row: Row, cfg: SampleCfg, threads: number): Promise<number> {
+async function mode_hvmc(row: Row, cfg: SampleCfg, threads: number, _bend_cmd: string | null): Promise<number> {
   var file = row.hvm_file;
   if (file === null) {
     throw new Error("internal: missing hvm file");
@@ -1034,16 +1083,26 @@ async function mode_hvmc(row: Row, cfg: SampleCfg, threads: number): Promise<num
 }
 
 var MODE_DEFS: ModeDef[] = [
-  { flag: "--bend-via-bunjs",                       label: "bend-bun",   input: "bend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bend_bun  },
-  { flag: "--bend-via-nodejs",                      label: "bend-node",  input: "bend", needs_bend: true,  needs_hvm: false, needs_bun: false, needs_node: true,  needs_node_ts: false, hvm_threads: false, run: mode_bend_node },
-  { flag: "--bend-via-hvm-interpreted",             label: "bend-hvmi",  input: "bend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmi },
-  { flag: "--bend-via-hvm-compiled",                label: "bend-hvmc",  input: "bend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmc },
-  { flag: "--bend-interpreted-via-bunjs",           label: "bendi-bun",  input: "bend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bendi_bun },
-  { flag: "--bend-interpreted-via-nodejs",          label: "bendi-node", input: "bend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: true,  needs_node_ts: true,  hvm_threads: false, run: mode_bendi_node },
-  { flag: "--bend-interpreted-via-hvm-interpreted", label: "bendi-hvmi", input: "bend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmi },
-  { flag: "--bend-interpreted-via-hvm-compiled",    label: "bendi-hvmc", input: "bend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmc },
-  { flag: "--hvm-interpreted",                      label: "hvmi",       input: "hvm",  needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmi      },
-  { flag: "--hvm-compiled",                         label: "hvmc",       input: "hvm",  needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmc      },
+  { flag: "--bend-via-bunjs",                       label: "bend-bun",      input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bend_bun  },
+  { flag: "--bend-via-nodejs",                      label: "bend-node",     input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: false, needs_bun: false, needs_node: true,  needs_node_ts: false, hvm_threads: false, run: mode_bend_node },
+  { flag: "--bend-via-hvm-interpreted",             label: "bend-hvmi",     input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmi },
+  { flag: "--bend-via-hvm-compiled",                label: "bend-hvmc",     input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmc },
+  { flag: "--bend-interpreted-via-bunjs",           label: "bendi-bun",     input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bendi_bun },
+  { flag: "--bend-interpreted-via-nodejs",          label: "bendi-node",    input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: true,  needs_node_ts: true,  hvm_threads: false, run: mode_bendi_node },
+  { flag: "--bend-interpreted-via-hvm-interpreted", label: "bendi-hvmi",    input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmi },
+  { flag: "--bend-interpreted-via-hvm-compiled",    label: "bendi-hvmc",    input: "bend", bend_cmd_src: "bend",    needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmc },
+
+  { flag: "--newbend-via-bunjs",                    label: "newbend-bun",   input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bend_bun  },
+  { flag: "--newbend-via-nodejs",                   label: "newbend-node",  input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: false, needs_bun: false, needs_node: true,  needs_node_ts: false, hvm_threads: false, run: mode_bend_node },
+  { flag: "--newbend-via-hvm-interpreted",          label: "newbend-hvmi",  input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmi },
+  { flag: "--newbend-via-hvm-compiled",             label: "newbend-hvmc",  input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bend_hvmc },
+  { flag: "--newbend-interpreted-via-bunjs",        label: "newbendi-bun",  input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_bendi_bun },
+  { flag: "--newbend-interpreted-via-nodejs",       label: "newbendi-node", input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: false, needs_bun: true,  needs_node: true,  needs_node_ts: true,  hvm_threads: false, run: mode_bendi_node },
+  { flag: "--newbend-interpreted-via-hvm-interpreted", label: "newbendi-hvmi", input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmi },
+  { flag: "--newbend-interpreted-via-hvm-compiled", label: "newbendi-hvmc", input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmc },
+
+  { flag: "--hvm-interpreted",                      label: "hvmi",          input: "hvm",  bend_cmd_src: "none",    needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmi      },
+  { flag: "--hvm-compiled",                         label: "hvmc",          input: "hvm",  bend_cmd_src: "none",    needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmc      },
 ];
 
 // Table
@@ -1205,14 +1264,18 @@ function redraw(rows: Row[], modes: Mode[], name_wid: number): void {
 
 // Ensures command dependencies for selected modes.
 function ensure_mode_deps(modes: Mode[]): void {
-  var need_bend    = modes.some(m => m.needs_bend);
   var need_hvm     = modes.some(m => m.needs_hvm);
   var need_bun     = modes.some(m => m.needs_bun);
   var need_node    = modes.some(m => m.needs_node);
-  var need_node_ts = modes.some(m => m.needs_node_ts);
-
-  if (need_bend) {
-    resolve_cmd_path(BEND_CMD);
+  var bend_cmds = new Set<string>();
+  for (var mode of modes) {
+    if (mode.bend_cmd === null) {
+      continue;
+    }
+    bend_cmds.add(mode.bend_cmd);
+  }
+  for (var bend_cmd of bend_cmds) {
+    resolve_cmd_path(bend_cmd);
   }
   if (need_hvm) {
     resolve_cmd_path(HVM_CMD);
@@ -1223,8 +1286,15 @@ function ensure_mode_deps(modes: Mode[]): void {
   if (need_node) {
     resolve_cmd_path(NODE_CMD);
   }
-  if (need_node_ts) {
-    bend_entry_get();
+  for (var mode of modes) {
+    if (!mode.needs_node_ts) {
+      continue;
+    }
+    var bend_cmd = mode.bend_cmd;
+    if (bend_cmd === null) {
+      continue;
+    }
+    bend_entry_get(bend_cmd);
   }
 }
 
@@ -1316,19 +1386,36 @@ function mode_flag(def: ModeDef, threads: number): string {
   return def.flag + "-T" + String(threads);
 }
 
+// Returns Bend command for one mode definition.
+function mode_bend_cmd(def: ModeDef): string | null {
+  switch (def.bend_cmd_src) {
+    case "none": {
+      return null;
+    }
+    case "bend": {
+      return BEND_CMD;
+    }
+    case "newbend": {
+      return NEW_BEND_CMD;
+    }
+  }
+}
+
 // Instantiates one selected mode.
 function mode_make(def: ModeDef, threads: number): Mode {
+  var bend_cmd = mode_bend_cmd(def);
   return {
     key:           def.label + "@" + String(threads),
     flag:          mode_flag(def, threads),
     label:         mode_label(def, threads),
     input:         def.input,
+    bend_cmd,
     needs_bend:    def.needs_bend,
     needs_hvm:     def.needs_hvm,
     needs_bun:     def.needs_bun,
     needs_node:    def.needs_node,
     needs_node_ts: def.needs_node_ts,
-    run:           (row, cfg) => def.run(row, cfg, threads),
+    run:           (row, cfg) => def.run(row, cfg, threads, bend_cmd),
   };
 }
 
@@ -1441,7 +1528,8 @@ function usage(): void {
     "  you can also pass labels directly (example: hvmi hvmi4 hvmc8 bend-bun)",
     "",
     "env overrides:",
-    "  BEND_CMD, HVM_CMD, BUN_CMD, NODE_CMD, BEND_NODE_ENTRY",
+    "  BEND_CMD, NEW_BEND_CMD, HVM_CMD, BUN_CMD, NODE_CMD",
+    "  BEND_NODE_ENTRY, NEW_BEND_NODE_ENTRY",
     "  BENCH_WARMUP, BENCH_MIN_RUNS, BENCH_MAX_RUNS, BENCH_MIN_SECS",
     "",
   ].join("\n"));
