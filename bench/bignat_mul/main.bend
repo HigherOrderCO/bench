@@ -228,4 +228,4 @@ def bench_take(rounds: U32, s: St) -> U32:
 
 # Entry point.
 def main() -> U32:
-  bench(960, 1, 0)
+  bench(146, 1, 0)

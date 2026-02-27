@@ -92,4 +92,4 @@ def bench(rounds: U32, acc: U32) -> U32:
       bench(r - 1, acc)
 
 def main() -> U32:
-  bench(3280000, 0)
+  bench(1560, 0)

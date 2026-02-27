@@ -67,15 +67,5 @@ def u32_to(n: Nat) -> U32:
     case 1n+p:
       u32_to(p) + 1
 
-# Runs repeated TAK evaluations and mixes results.
-def bench(rounds: U32, acc: U32) -> U32:
-  match rounds:
-    case 0:
-      acc
-    case r:
-      val = u32_to(tak(23n, 17n, 11n))
-      acc = (acc ^ val) * 16777619 + 2166136261
-      bench(r - 1, acc)
-
 def main() -> U32:
-  bench(6, 0)
+  u32_to(tak(23n, 17n, 11n))

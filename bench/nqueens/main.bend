@@ -94,4 +94,4 @@ def bench_go(done: Bool, rounds: U32, acc: U32) -> U32:
 
 # Entry point.
 def main() -> U32:
-  bench(104, 0)
+  bench(21, 0)
