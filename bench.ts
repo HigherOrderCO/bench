@@ -6,6 +6,7 @@
 // Sources:
 // - `bench/*/main.bend` for Bend pipelines
 // - `bench/*/main.hvm`  for HVM pipelines
+// - `bench/*/main.ts`   for native TS pipelines
 //
 // Sampling model:
 // - warmup calls
@@ -62,6 +63,7 @@ type Row = {
   name:      string;
   bend_file: string | null;
   hvm_file:  string | null;
+  ts_file:   string | null;
   cells:     Record<string, Cell>;
 };
 
@@ -72,7 +74,7 @@ type SampleCfg = {
   min_secs: number;
 };
 
-type ModeInput = "bend" | "hvm";
+type ModeInput = "bend" | "hvm" | "ts";
 type BendCmdSrc = "none" | "bend" | "newbend";
 
 type ModeDef = {
@@ -756,10 +758,12 @@ function discover_rows(): Row[] {
 
     var bend_file = path.join(dir, "main.bend");
     var hvm_file  = path.join(dir, "main.hvm");
+    var ts_file   = path.join(dir, "main.ts");
 
     var has_bend = fs.existsSync(bend_file);
     var has_hvm  = fs.existsSync(hvm_file);
-    if (!has_bend && !has_hvm) {
+    var has_ts   = fs.existsSync(ts_file);
+    if (!has_bend && !has_hvm && !has_ts) {
       continue;
     }
 
@@ -767,6 +771,7 @@ function discover_rows(): Row[] {
       name,
       bend_file: has_bend ? bend_file : null,
       hvm_file: has_hvm ? hvm_file : null,
+      ts_file:   has_ts ? ts_file : null,
       cells: {},
     });
   }
@@ -780,6 +785,7 @@ function discover_rows(): Row[] {
 var BEND_JS_CACHE  = new Map<string, string>();
 var BEND_HVM_CACHE = new Map<string, string>();
 var HVM_BIN_CACHE  = new Map<string, string>();
+var TS_NODE_CACHE  = new Map<string, string>();
 
 // HVM Helpers
 // -----------
@@ -866,6 +872,14 @@ async function bend_node_bundle_get(bend_cmd: string): Promise<string> {
 
   var entry = bend_entry_get(bend_cmd);
   var out   = tmp_path(["bend", "node", "bundle", bend_cmd], ".mjs");
+  await js_node_bundle_make(entry, out);
+
+  BEND_NODE_BUNDLE_CACHE.set(bend_cmd, out);
+  return out;
+}
+
+// Bundles one TS/JS entry into one Node-runnable ESM file.
+async function js_node_bundle_make(entry: string, out: string): Promise<void> {
   await run_cmd(BUN_CMD, [
     "build",
     entry,
@@ -874,9 +888,6 @@ async function bend_node_bundle_get(bend_cmd: string): Promise<string> {
     "--outfile",
     out,
   ], ROOT_DIR);
-
-  BEND_NODE_BUNDLE_CACHE.set(bend_cmd, out);
-  return out;
 }
 
 // Compiles one `.bend` file to `.hvm` through Bend CLI and caches output.
@@ -928,6 +939,41 @@ async function bend_run_once_node(file: string, bend_cmd: string = BEND_CMD): Pr
   await run_cmd(NODE_CMD, [bundle, file], ROOT_DIR);
 }
 
+// Builds one TS benchmark into one Node-runnable module and caches it.
+async function ts_node_bundle_get(file: string): Promise<string> {
+  var old = TS_NODE_CACHE.get(file);
+  if (old !== undefined) {
+    return old;
+  }
+
+  var out = tmp_path(["ts", "node", bench_tag(file)], ".mjs");
+  await js_node_bundle_make(file, out);
+
+  TS_NODE_CACHE.set(file, out);
+  return out;
+}
+
+// Runs one JS/TS module hot in Bun.
+async function js_run_hot_bun(mod_file: string, cfg: SampleCfg): Promise<number> {
+  var mod = await import(js_mod_url(mod_file));
+  var run = js_main_get(mod as Record<string, unknown>);
+  return run_hot_sync(run, cfg);
+}
+
+// Runs one JS/TS module hot in Node.
+async function js_run_hot_node(mod_file: string, cfg: SampleCfg): Promise<number> {
+  var runner = js_node_runner_path();
+  var out = await run_cmd(NODE_CMD, [
+    runner,
+    mod_file,
+    String(cfg.warmup),
+    String(cfg.min_runs),
+    String(cfg.max_runs),
+    String(cfg.min_secs),
+  ], ROOT_DIR);
+  return secs_parse(out);
+}
+
 // Modes
 // -----
 
@@ -942,9 +988,7 @@ async function mode_bend_bun(row: Row, cfg: SampleCfg, _threads: number, bend_cm
   }
 
   var mod_file = await bend_compile_js_lib(file, bend_cmd);
-  var mod      = await import(js_mod_url(mod_file));
-  var run      = js_main_get(mod as Record<string, unknown>);
-  return run_hot_sync(run, cfg);
+  return await js_run_hot_bun(mod_file, cfg);
 }
 
 // Runs native Bend via Node (compile once, hot-call main in one helper).
@@ -958,17 +1002,28 @@ async function mode_bend_node(row: Row, cfg: SampleCfg, _threads: number, bend_c
   }
 
   var mod_file = await bend_compile_js_lib(file, bend_cmd);
-  var runner   = js_node_runner_path();
+  return await js_run_hot_node(mod_file, cfg);
+}
 
-  var out = await run_cmd(NODE_CMD, [
-    runner,
-    mod_file,
-    String(cfg.warmup),
-    String(cfg.min_runs),
-    String(cfg.max_runs),
-    String(cfg.min_secs),
-  ], ROOT_DIR);
-  return secs_parse(out);
+// Runs one native TS benchmark via Bun.
+async function mode_ts_bun(row: Row, cfg: SampleCfg, _threads: number, _bend_cmd: string | null): Promise<number> {
+  var file = row.ts_file;
+  if (file === null) {
+    throw new Error("internal: missing ts file");
+  }
+
+  return await js_run_hot_bun(file, cfg);
+}
+
+// Runs one native TS benchmark via Node.
+async function mode_ts_node(row: Row, cfg: SampleCfg, _threads: number, _bend_cmd: string | null): Promise<number> {
+  var file = row.ts_file;
+  if (file === null) {
+    throw new Error("internal: missing ts file");
+  }
+
+  var mod_file = await ts_node_bundle_get(file);
+  return await js_run_hot_node(mod_file, cfg);
 }
 
 // Runs native Bend via HVM interpreted.
@@ -1095,6 +1150,8 @@ var MODE_DEFS: ModeDef[] = [
   { flag: "--newbend-interpreted-via-hvm-interpreted", label: "newbendi-hvmi", input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmi },
   { flag: "--newbend-interpreted-via-hvm-compiled", label: "newbendi-hvmc", input: "bend", bend_cmd_src: "newbend", needs_bend: true,  needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_bendi_hvmc },
 
+  { flag: "--ts-via-bunjs",                         label: "ts-bun",        input: "ts",   bend_cmd_src: "none",    needs_bend: false, needs_hvm: false, needs_bun: true,  needs_node: false, needs_node_ts: false, hvm_threads: false, run: mode_ts_bun   },
+  { flag: "--ts-via-nodejs",                        label: "ts-node",       input: "ts",   bend_cmd_src: "none",    needs_bend: false, needs_hvm: false, needs_bun: true,  needs_node: true,  needs_node_ts: false, hvm_threads: false, run: mode_ts_node  },
   { flag: "--hvm-interpreted",                      label: "hvmi",          input: "hvm",  bend_cmd_src: "none",    needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmi      },
   { flag: "--hvm-compiled",                         label: "hvmc",          input: "hvm",  bend_cmd_src: "none",    needs_bend: false, needs_hvm: true,  needs_bun: false, needs_node: false, needs_node_ts: false, hvm_threads: true,  run: mode_hvmc      },
 ];
@@ -1310,6 +1367,9 @@ async function bench_all(modes: Mode[], cfg: SampleCfg): Promise<number> {
         state = "na";
       }
       if (mode.input === "hvm" && row.hvm_file === null) {
+        state = "na";
+      }
+      if (mode.input === "ts" && row.ts_file === null) {
         state = "na";
       }
       row.cells[mode.flag] = cell_new(state);

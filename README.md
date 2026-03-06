@@ -4,7 +4,7 @@ bench
 Unified benchmarks for [HVM](https://github.com/HigherOrderCO/HVM4) and [Bend](https://github.com/HigherOrderCO/bend2-ts).
 
 Each subdirectory under `bench/` contains a single benchmark case.
-Files are named `main.hvm` (HVM) or `main.bend` (Bend).
+Files are named `main.hvm` (HVM), `main.bend` (Bend), or `main.ts` (native TS).
 
 Benchmarks
 ----------
@@ -18,6 +18,7 @@ Benchmarks
 - `gab_deriv` — Symbolic differentiation of a polynomial, 5000 iterations (Bend)
 - `gab_tak` — Takeuchi triply-recursive function on Nat (18, 12, 6) (Bend)
 - `gab_takl` — Takeuchi variant using list length comparison (18, 12, 6) (Bend)
+- `fib_nat` — Naive Fibonacci over unary naturals with unary addition and unary-to-U32 conversion (HVM/TS)
 - `gen_easy` — Type-directed proof search generating a sort function, small inputs (HVM)
 - `gen_hard` — Type-directed proof search generating a sort function, large inputs (HVM)
 - `gen_mul4k` — Proof search generating a multiplication function (HVM)
@@ -39,6 +40,7 @@ Run benchmarks with the unified script:
 ```sh
 ./bench.ts --hvm-interpreted
 ./bench.ts --hvm-compiled
+./bench.ts --ts-via-bunjs --ts-via-nodejs
 ./bench.ts --bend-via-bunjs --bend-via-nodejs
 ./bench.ts --bend-interpreted-via-bunjs --bend-interpreted-via-hvm-compiled
 ```
@@ -47,6 +49,8 @@ Available options:
 
 - `--bend-via-bunjs` (`bend-bun`)
 - `--bend-via-nodejs` (`bend-node`)
+- `--ts-via-bunjs` (`ts-bun`)
+- `--ts-via-nodejs` (`ts-node`)
 - `--bend-via-hvm-interpreted[-TN]` (`bend-hvmi[N]`)
 - `--bend-via-hvm-compiled[-TN]` (`bend-hvmc[N]`)
 - `--bend-interpreted-via-bunjs` (`bendi-bun`)
