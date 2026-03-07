@@ -10,9 +10,11 @@
 @build = λ{
   0n: λ&sed.
     #leaf{sed};
-  1n+: λ&dep. λ&sed.
-    ! lft = @build(dep, sed * 1664525 + 1013904223);
-    ! rgt = @build(dep, sed * 214013 + 2531011);
+  1n+: λdep. λsed.
+    ! D &D = dep
+    ! S &S = sed
+    ! lft = @build(D₀, S₀ * 1664525 + 1013904223);
+    ! rgt = @build(D₁, S₁ * 214013 + 2531011);
     #node{lft, rgt}
 }
 
@@ -23,7 +25,7 @@
 @fold = λ{
   #leaf: λ&val.
     val;
-  #node: λ&lft. λ&rgt.
+  #node: λlft. λrgt.
     ! &a = @fold(lft);
     ! b  = @fold(rgt);
     (a + b) ^ (a * 31)
